@@ -70,32 +70,41 @@ Sobra Real Livre     = O valor que você realmente tem disponível para poupar o
 
 ```mermaid
 flowchart TD
-    subgraph Frontend["Frontend (Vanilla JS / HTML5 / CSS3)"]
-        UI["Dashboard / Extratos / Calendário / Config"]
-        Charts["Chart.js (Fluxo de Caixa & Distribuição)"]
+    subgraph C1["Frontend (SPA Web)"]
+        UI["Dashboard & Linha do Tempo"]
+        Charts["Visualização Gráfica (Chart.js)"]
+        UI --> Charts
     end
 
-    subgraph Backend["Backend Node.js (Express)"]
-        API["REST API (/api/...)"]
-        Engine["Motor de Heurísticas & Regras"]
-        Parser["Super Parser PDF (Itaú / Nu / MP)"]
-        SyncEngine["Sync Diário Open Finance (AUVP)"]
-        IAEngine["Assistente de Insights IA (DeepSeek / Ollama)"]
+    subgraph C2["Backend (Node.js & Express)"]
+        API["Servidor REST API (/api)"]
+        Rules["Motor de Heurísticas & Categorização"]
+        Parser["Super Parser de Faturas (PDF)"]
+        Sync["Sincronização Diária (Open Finance)"]
+        AI["Assistente de Diagnósticos com IA"]
+
+        API --> Rules
+        API --> Parser
+        API --> Sync
+        API --> AI
     end
 
-    subgraph Storage["Persistência Local"]
-        DB[("SQLite Local (financas.db)")]
-        Env[".env (Segredos & Credenciais Locais)"]
+    subgraph C3["Persistência Local (100% Privado)"]
+        DB[("Banco de Dados SQLite (financas.db)")]
     end
 
-    UI <-->|JSON REST| API
-    API --> Engine
-    API --> Parser
-    API --> SyncEngine
-    API --> IAEngine
-    Engine --> DB
-    SyncEngine --> DB
-    Env -.-> API
+    subgraph C4["Integrações Externas (Opcionais)"]
+        AUVP["Open Finance (AUVP / MCP)"]
+        LLM["Provedores LLM (DeepSeek / Ollama)"]
+    end
+
+    UI -->|Requisições HTTP| API
+    Rules --> DB
+    Parser --> DB
+    Sync --> DB
+
+    Sync --> AUVP
+    AI --> LLM
 ```
 
 ---
