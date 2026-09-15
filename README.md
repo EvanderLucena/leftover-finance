@@ -1,103 +1,216 @@
-# Leftover Finance — Gestão Financeira & Projeção de Fluxo de Caixa
+# Leftover Finance — Gestão Financeira Pessoal & Projeção de Sobra Real
 
-Sistema pessoal completo para controle de fluxo de caixa, gestão de contas bancárias, reconciliação de extratos e projeção de comprometimento futuro (cartões, parcelas e despesas fixas).
+<p align="center">
+  <img src="app/public/logo.svg" alt="Leftover Finance Logo" width="90" height="90" />
+</p>
 
----
+<p align="center">
+  <strong>Sistema inteligente de fluxo de caixa, gestão de despesas fixas, antecipação de faturas de cartão de crédito e projeção de liquidez futura.</strong>
+</p>
 
-## 🚀 Principais Recursos
-
-- **Painel Central de Finanças (Dashboard):**
-  - Projeção de saldo futuro após quitação de faturas e compromissos.
-  - Card analítico *"Para onde vai cada real"* com distribuição percentual (Faturas de Cartão, Fixos da Casa, Parcelas de Dívida e Gastos Variáveis).
-  - Métricas de pressão orçamentária e sobra real líquida.
-
-- **Inteligência de Cartões & Faturas:**
-  - Modelo de identidade de parcelas: evita duplicação de faturas e compras futuras.
-  - Sincronização e cálculo automático de faturas abertas por data de fechamento e vencimento.
-  - Calendário e linha do tempo de dívidas e parcelas contratadas.
-
-- **Conexão Open Finance & Extratos:**
-  - Sincronização diária via Open Finance (AUVP / MCP).
-  - Parser automático para faturas e extratos em PDF (Itaú, Nubank, Mercado Pago).
-  - Motor de regras heurísticas para auto-categorização e conciliação de transações.
-
-- **IA Assistente Financeira:**
-  - Geração automática de diagnósticos orçamentários e sugestões de corte de custos.
-  - Integração configurável com modelos locais ou remotos (DeepSeek, Ollama Cloud ou compatíveis com OpenAI).
-
-- **100% Privado e Local:**
-  - Banco de dados SQLite embarcado (`node:sqlite`), sem envio de extratos para serviços de terceiros não autorizados.
-  - Arquitetura pronta para deploy seguro via Docker e Caddy com autenticação HTTP básica e HTTPS automático.
+<p align="center">
+  <img src="https://img.shields.io/badge/node.js-v20+-68a063?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/database-SQLite%20nativo-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" />
+  <img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/open--finance-AUVP%20API-4dabff?style=flat-square" alt="Open Finance" />
+  <img src="https://img.shields.io/badge/privacy-100%25%20local-success?style=flat-square" alt="Privacy First" />
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License MIT" />
+</p>
 
 ---
 
-## 🛠️ Tecnologias
+## 📌 A Filosofia: "Sobra Real" vs "Saldo Ilusório"
 
-- **Backend:** Node.js (Express, `node:sqlite` nativo)
-- **Frontend:** Vanilla JavaScript, HTML5, CSS3, Chart.js
-- **Infraestrutura:** Docker, Docker Compose, Caddy 2
+A maioria dos aplicativos financeiros tradicionais mostra apenas o seu saldo bancário atual ou um gráfico do que você já gastou no passado. Isso cria uma ilusão de caixa: você tem R$ 5.000 na conta hoje, mas na próxima semana vencem R$ 4.000 em faturas de cartão e contas fixas.
 
----
+O **Leftover Finance** foca no que realmente importa: **a sua Sobra Real**.
+Ele calcula o fluxo de liquidez projetando o mês atual e meses futuros através de 4 camadas:
 
-## 📦 Como Rodar Localmente
-
-### Pré-requisitos
-- Node.js 20+ instalado.
-
-### Passo a passo
-1. Clone o repositório:
-   ```bash
-   git clone https://github.com/EvanderLucena/leftover-finance.git
-   cd leftover-finance/app
-   ```
-
-2. Instale as dependências:
-   ```bash
-   npm install
-   ```
-
-3. Configure as variáveis de ambiente (opcional):
-   ```bash
-   cp .env.example .env
-   ```
-
-4. Inicie o servidor:
-   ```bash
-   npm start
-   ```
-
-5. Acesse no navegador: `http://localhost:3000`
+```
+Liquidez Disponível = Saldo em Conta + Rendas Previstas
+                     − Faturas de Cartão (correntes e compras parceladas)
+                     − Despesas Fixas da Casa (aluguel, condomínio, luz, etc.)
+                     − Parcelas Contratadas (empréstimos, financiamentos)
+                     − Média Móvel de Gastos Variáveis
+────────────────────────────────────────────────────────────────────────────
+Sobra Real Livre     = O valor que você realmente tem disponível para poupar ou investir.
+```
 
 ---
 
-## 🐳 Rodando com Docker
+## 🚀 Funcionalidades Principais
 
-1. Navegue até o diretório da aplicação:
-   ```bash
-   cd app
-   ```
+### 1. 📊 Painel de Controle (Command Center)
+- **Visão Instantânea de Liquidez:** Saldo real de contas correntes, faturas de cartão fechando/vencendo e previsão de saldo pós-faturas.
+- **Card "Para Onde Vai Cada Real":** Distribuição proporcional exata da renda (Faturas de Cartão, Despesas Fixas, Parcelas de Dívidas e Variável) com indicador de pressão orçamentária.
+- **Barra de Progresso Temporal do Mês:** Acompanhe o percentual do mês decorrido vs. ritmo de consumo da renda.
 
-2. Copie e configure o arquivo de ambiente:
-   ```bash
-   cp .env.example .env
-   # Edite o .env informando o seu domínio e o hash da sua senha
-   ```
+### 2. 💳 Inteligência de Faturas & Modelo de Parcelas
+- **Identidade Única de Compras:** Compras parceladas existem uma única vez no sistema; evidências vindas de múltiplos PDFs ou Open Finance são unificadas sem duplicar valores.
+- **Relógio de Faturas em Tempo Real:** Acompanhamento dinâmico de datas de corte (fechamento) e vencimento por emissor (Itaú, Nubank, Mercado Pago, etc.).
+- **Calendário de Descompressão de Dívidas:** Projeção visual de quando cada parcela contratada termina, permitindo prever a recuperação da renda nos próximos meses.
 
-3. Suba os containers com Docker Compose:
-   ```bash
-   docker compose up -d
-   ```
+### 3. 🏦 Conexão Open Finance (AUVP) & Super Parser PDF
+- **Sincronização Diária Open Finance:** Integração nativa com AUVP / MCP para pull automático de saldos bancários, faturas e transações agendadas.
+- **Super Parser de Extratos em PDF:** Leitura nativa de faturas detalhadas em PDF (Itaú, Nubank e Mercado Pago).
+- **Motor Heurístico de Regras:** Auto-categorização e detecção de natureza financeira (`gasto`, `transferencia`, `transferencia-propria`, `salario`, `rendimento`, `ignorado`).
 
-O serviço iniciará a aplicação Node na porta interna 3000 e o Caddy nas portas 80/443 com reverse proxy e SSL automático.
+### 4. 🤖 Assistente de Diagnóstico Financeiro com IA
+- **Auditoria de Liquidez e Gastos:** Análise em tempo real do comprometimento orçamentário e recomendações práticas para corte de excessos.
+- **Suporte Flexível a Modelos:** Compatível com qualquer endpoint no formato OpenAI / Ollama (ex: DeepSeek-V3, Qwen, Ollama Cloud ou instâncias locais).
+
+### 5. 🔒 Privacidade Absoluta & Segurança de Chaves
+- **100% Local:** Todo o armazenamento reside em um banco SQLite (`financas.db`) gerenciado pelo módulo nativo `node:sqlite`.
+- **Zero Vazamento:** Extratos, senhas, planilhas e histórico financeiro são rigorosamente protegidos no `.gitignore`.
+- **Chaves de API Seguras:** Tokens de IA e Open Finance ficam armazenados apenas no banco de dados local da sua instância ou em variáveis de ambiente (`.env`), nunca sendo versionados ou expostos para terceiros.
 
 ---
 
-## 🔒 Privacidade de Dados
+## 🏗️ Arquitetura do Sistema
 
-Este repositório não inclui nem armazena extratos, bancos de dados pessoais ou credenciais bancárias. Todas as informações financeiras são mantidas estritamente no banco de dados SQLite local (`financas.db`), o qual é ignorado por padrão no `.gitignore`.
+```mermaid
+flowchart TD
+    subgraph Frontend["Frontend (Vanilla JS / HTML5 / CSS3)"]
+        UI["Dashboard / Extratos / Calendário / Config"]
+        Charts["Chart.js (Fluxo de Caixa & Distribuição)"]
+    end
+
+    subgraph Backend["Backend Node.js (Express)"]
+        API["REST API (/api/...)"]
+        Engine["Motor de Heurísticas & Regras"]
+        Parser["Super Parser PDF (Itaú / Nu / MP)"]
+        SyncEngine["Sync Diário Open Finance (AUVP)"]
+        IAEngine["Assistente de Insights IA (DeepSeek / Ollama)"]
+    end
+
+    subgraph Storage["Persistência Local"]
+        DB[("SQLite Local (financas.db)")]
+        Env[".env (Segredos & Credenciais Locais)"]
+    end
+
+    UI <-->|JSON REST| API
+    API --> Engine
+    API --> Parser
+    API --> SyncEngine
+    API --> IAEngine
+    Engine --> DB
+    SyncEngine --> DB
+    Env -.-> API
+```
+
+---
+
+## 📁 Estrutura do Projeto
+
+```text
+leftover-finance/
+├── .gitignore               # Proteção estrita contra vazamento de dados pessoais
+├── LICENSE                  # Licença MIT
+├── README.md                # Documentação do projeto
+└── app/
+    ├── server.js            # Servidor Express & endpoints da API
+    ├── db.js                # Inicialização e schemas SQLite (node:sqlite)
+    ├── package.json         # Dependências do Node.js
+    ├── Dockerfile           # Imagem conteinerizada de produção
+    ├── docker-compose.yml   # Orquestração do App + Caddy (Reverse Proxy SSL)
+    ├── Caddyfile            # Configuração Caddy com autenticação básica
+    ├── .env.example         # Template de variáveis de ambiente
+    ├── public/              # Frontend web estático
+    │   ├── index.html       # Estrutura SPA
+    │   ├── style.css        # Tema e estilos customizados
+    │   ├── app.js           # Lógica do frontend
+    │   ├── chart.umd.js     # Biblioteca gráfica Chart.js
+    │   └── logo.svg         # Identidade visual
+    └── scripts/             # Módulos de lógica de negócios
+        ├── auvp-client.js   # Integração com API Open Finance
+        ├── faturas-abertas.js # Cálculo de faturas em aberto
+        ├── parcelas-futuras.js # Motor de projeção de dívidas
+        ├── super-parser.js  # Parser de faturas bancárias PDF
+        ├── motor-regras.js  # Categorização automática
+        ├── insights-ia.js   # Geração de análises com IA
+        └── sync-diario.js   # Agendador de sincronização em segundo plano
+```
+
+---
+
+## 💻 Instalação & Execução
+
+### Opção 1: Executando Localmente (Node.js)
+
+#### Pré-requisitos
+- **Node.js 20+** instalado (requer suporte a `node:sqlite`).
+- Gerenciador de pacotes **npm**.
+
+```bash
+# 1. Clone o repositório
+git clone https://github.com/EvanderLucena/leftover-finance.git
+cd leftover-finance/app
+
+# 2. Instale as dependências
+npm install
+
+# 3. Configure o arquivo de variáveis (opcional para teste local)
+cp .env.example .env
+
+# 4. Inicie o servidor
+npm start
+```
+
+Acesse a interface no navegador: **`http://localhost:3000`**
+
+---
+
+### Opção 2: Executando via Docker Compose (Produção / Self-Hosted)
+
+A aplicação conta com suporte nativo a Docker e proxy reverso Caddy, fornecendo HTTPS automático e camada de autenticação HTTP básica.
+
+```bash
+# 1. Navegue até o diretório da aplicação
+cd leftover-finance/app
+
+# 2. Crie e ajuste o arquivo .env
+cp .env.example .env
+```
+
+Edite o arquivo `.env`:
+```env
+DOMAIN=financas.seu-dominio.com
+AUTH_USER=admin
+AUTH_PASS_HASH=$2a$14$...   # Gerado via: docker run --rm caddy:2 caddy hash-password --plaintext 'sua-senha'
+IA_URL=https://api.deepseek.com
+IA_KEY=sua-chave-aqui
+IA_MODEL=deepseek-chat
+```
+
+Inicie os serviços conteinerizados:
+```bash
+docker compose up -d
+```
+
+---
+
+## 🔑 Segurança e Gestão de Chaves de API
+
+- **Nunca comite chaves de API:** As credenciais da AUVP (Open Finance) e provedores de IA (OpenAI / Ollama / DeepSeek) devem ser configuradas exclusivamente:
+  - Via arquivo `.env` (ignorado pelo Git); OU
+  - Diretamente na interface da aplicação em **Configurações** (armazenado de forma privada no seu arquivo local `financas.db`).
+- O servidor nunca expõe chaves privadas nas rotas de status da API; apenas sinalizadores booleanos (`temKey: true/false`) são retornados à interface.
+
+---
+
+## 🤝 Contribuições
+
+Contribuições são bem-vindas! Sinta-se à vontade para abrir uma *Issue* para relatar problemas ou enviar um *Pull Request* com melhorias.
+
+1. Faça um Fork do projeto
+2. Crie uma branch para a sua feature (`git checkout -b feature/nova-funcionalidade`)
+3. Faça o commit das suas alterações (`git commit -m 'feat: adiciona nova funcionalidade'`)
+4. Faça o push para a branch (`git push origin feature/nova-funcionalidade`)
+5. Abra um Pull Request
 
 ---
 
 ## 📄 Licença
 
-Distribuído sob a licença MIT. Consulte `LICENSE` para mais detalhes.
+Distribuído sob a licença **MIT**. Consulte o arquivo [`LICENSE`](LICENSE) para mais detalhes.
+
