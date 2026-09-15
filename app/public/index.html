@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leftover Finance — Controle Financeiro</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="logo"><img src="/logo.svg" alt="" class="logo-mark"> LEFTOVER<b>FINANCE</b></span>
+  <span class="pill live" id="top-sync">dados carregando</span>
+  <span class="pill" id="top-fontes">carregando fontes…</span>
+  <span class="spacer"></span>
+  <button class="ghost" id="btn-privado" title="Ocultar/mostrar valores (modo privado)" style="padding:5px 12px; font-size:14px; display:flex; align-items:center; justify-content:center;"></button>
+  <span class="pill mono" id="top-renda">—</span>
+</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="nav-item active" data-view="visao">◎ Visão geral</div>
+    <div class="nav-item" data-view="extratos">▤ Extratos</div>
+    <div class="nav-item" data-view="projecao">◉ Projeção</div>
+    <div class="section">OPERAÇÃO</div>
+    <div class="nav-item" data-view="mes">☐ Contas do mês</div>
+    <div class="nav-item" data-view="recorrentes">⏱ Recorrentes</div>
+    <div class="section">DADOS</div>
+    <div class="nav-item" data-view="compras">◈ Compras</div>
+    <div class="nav-item" data-view="importar">⬆ Importar</div>
+    <div class="nav-item" data-view="reconciliar">🔄 Reconciliar</div>
+    <div class="nav-item" data-view="configurar">⚙ Configurar</div>
+  </aside>
+
+  <main class="content">
+    <!-- ================= VISÃO GERAL ================= -->
+    <section id="view-visao">
+      <!-- hero: como estou agora -->
+      <div class="vc-hero" id="vc-hero"></div>
+
+      <!-- linha 2: contexto rápido -->
+      <div class="grid g23" style="margin-bottom:12px;">
+        <div class="panel">
+          <h4>PRÓXIMOS VENCIMENTOS <span class="muted" style="font-size:10px; text-transform:none" id="vc-prox-titulo"></span></h4>
+          <div id="vc-proximos"></div>
+        </div>
+        <div class="panel">
+          <h4>DÍVIDA PARCELADA <span class="muted" style="font-size:10px; text-transform:none">restante + alívio</span></h4>
+          <div id="vc-divida"></div>
+        </div>
+      </div>
+
+      <!-- linha 3: análises -->
+      <div class="grid g23">
+        <div class="panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+            <h4 style="margin:0; letter-spacing:.5px;">PARA ONDE VAI CADA REAL — <span id="flow-mes-titulo" style="color:var(--txt);">MÊS ATUAL</span></h4>
+            <div id="flow-badge-status"></div>
+          </div>
+          <div class="flow" id="fluxo"></div>
+          <div id="flow-resumo-rodape"></div>
+        </div>
+        <div class="panel">
+          <h4>DÍVIDAS EM ANDAMENTO <span class="muted" style="font-size:10px; text-transform:none">ordenado por término</span></h4>
+          <table><thead><tr><th>Quem</th><th>Resta</th><th>Progresso</th><th>Termina</th></tr></thead><tbody id="dividas"></tbody></table>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+          <h4 style="margin:0;">DIAGNÓSTICO FINANCEIRO & INSIGHTS <span class="muted" style="font-size:11px; text-transform:none; font-weight:normal;" id="insights-meta"></span></h4>
+          <button class="ghost" id="btn-atualizar-insights-ia" style="padding:4px 10px; font-size:12px; display:flex; align-items:center; gap:6px;" title="Recalcular diagnóstico inteligente com DeepSeek">
+            <span>🪄 Atualizar com IA</span>
+          </button>
+        </div>
+        <div id="insights"></div>
+      </div>
+    </section>
+
+    <!-- ================= EXTRATOS ================= -->
+    <section id="view-extratos" hidden>
+      <!-- 1. Cockpit Header: Seletor de Conta & Saldos em Tempo Real -->
+      <div class="panel" style="margin-bottom:12px; padding:16px 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:14px;">
+          <div>
+            <h4 style="margin:0; display:flex; align-items:center; gap:8px;">
+              <span>▤ EXTRATO & LIVRO-RAZÃO FINANCEIRO</span>
+              <span class="muted" style="font-size:11.5px; text-transform:none; letter-spacing:0; font-weight:normal;">auditoria completa de movimentações, saldos correntes e conciliação bancária</span>
+            </h4>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <select class="fselect" id="ext-conta" style="min-width:240px; font-weight:600;">
+              <option value="todas">🌐 Todas as Contas (Consolidado)</option>
+              <optgroup label="Contas Bancárias">
+                <option value="itau">🏦 Itaú conta corrente</option>
+                <option value="nubank_conta">🟣 Nubank conta</option>
+                <option value="btg">💼 BTG Banking</option>
+              </optgroup>
+              <optgroup label="Cartões de Crédito">
+                <option value="nubank_cartao">💳 Nubank (gold)</option>
+                <option value="mp_cartao">💳 Mercado Pago</option>
+                <option value="itau_cartao">💳 Itaú Visa Signature</option>
+              </optgroup>
+            </select>
+            <button class="ghost" id="ext-btn-toggle-graficos" title="Ocultar ou exibir gráficos analíticos" style="padding:6px 12px; font-size:12.5px;">📊 Gráficos</button>
+            <button class="ghost" id="ext-export" title="Exportar seleção atual para CSV" style="padding:6px 12px; font-size:12.5px;">⬇ CSV</button>
+          </div>
+        </div>
+
+        <!-- KPI Strip: Saldos & Liquidez em tempo real -->
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
+          <div class="ext-kpi-card">
+            <span class="lbl">DISPONÍVEL EM CONTA</span>
+            <span class="val mono" style="color:var(--green);" id="ext-global-disponivel">—</span>
+            <span class="sub muted">saldos bancários somados</span>
+          </div>
+          <div class="ext-kpi-card">
+            <span class="lbl">FATURAS ABERTAS (CARTÕES)</span>
+            <span class="val mono" style="color:var(--red);" id="ext-global-faturas">—</span>
+            <span class="sub muted">passivo curto prazo aberto</span>
+          </div>
+          <div class="ext-kpi-card">
+            <span class="lbl" id="ext-kpi-conta-label">SALDO CONSOLIDADO</span>
+            <span class="val mono" id="ext-conta-saldo">—</span>
+            <span class="sub muted" id="ext-conta-quando">via open banking</span>
+          </div>
+          <div class="ext-kpi-card">
+            <span class="lbl">FLUXO DO PERÍODO FILTRADO</span>
+            <span class="val mono" id="ext-kpi-resultado">—</span>
+            <span class="sub muted" id="ext-kpi-detalhe-fluxo">entradas vs saídas</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Barra Unificada de Filtros e Recortes (Sticky) -->
+      <div class="panel" style="padding:14px 18px; position:sticky; top:60px; z-index:40; margin-bottom:12px;">
+        <!-- Linha 1: Período Inteligente -->
+        <div class="filters" id="per-bar-extratos" style="margin-bottom:10px;">
+          <span class="muted" style="font-weight:600; font-size:12px;">Período:</span>
+          <span class="fchip on" data-per="mes-atual">Mês atual</span>
+          <span class="fchip" data-per="mes-anterior">Mês anterior</span>
+          <span class="fchip" data-per="3">3 meses</span>
+          <span class="fchip" data-per="6">6 meses</span>
+          <span class="fchip" data-per="12">12 meses</span>
+          <span class="fchip" data-per="ano">Ano 2026</span>
+          <span class="fchip" data-per="tudo">Tudo</span>
+          <span class="fchip" data-per="custom">Personalizado</span>
+          <span class="per-custom" hidden>
+            <input type="month" class="per-de"> <span class="muted">até</span> <input type="month" class="per-ate">
+          </span>
+          <span class="per-label muted"></span>
+        </div>
+
+        <!-- Linha 2: Filtros Estruturados & Busca -->
+        <div class="filters" style="margin-bottom:8px;">
+          <select class="fselect" id="ext-natureza" style="min-width:140px;">
+            <option value="">Todas as naturezas</option>
+            <option value="gasto">💸 Gastos</option>
+            <option value="entrada">💰 Entradas / Salários</option>
+            <option value="transferencia">💳 Pagamento de fatura</option>
+            <option value="transferencia-propria">🔁 Entre contas</option>
+            <option value="rendimento">📈 Rendimentos</option>
+            <option value="ignorado">👁️ Ocultadas / Neutras</option>
+          </select>
+          <select class="fselect" id="ext-categoria" style="min-width:170px;">
+            <option value="">Todas as categorias</option>
+          </select>
+          <select class="fselect" id="ext-fonte" style="min-width:160px;">
+            <option value="">Todas as fontes/bancos</option>
+          </select>
+          <input type="search" id="ext-busca" class="fselect" placeholder="🔍 buscar descrição, notas, estabelecimento… (atalho /)" style="flex:1; min-width:200px;">
+          <button class="ghost" id="ext-limpar" title="Limpar todos os filtros">✕ limpar</button>
+        </div>
+
+        <!-- Linha 3: Chips de Auditoria Rápida -->
+        <div class="filters" style="margin-bottom:0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:.5px;">Auditoria Rápida:</span>
+          <span class="fchip" id="chip-sem-categoria">⚠️ Sem Categoria <b id="count-sem-cat" class="mono" style="font-size:11px;">(0)</b></span>
+          <span class="fchip" id="chip-maiores-gastos">⚡ Maiores Gastos (&gt; R$ 500)</span>
+          <span class="fchip" id="chip-parceladas">💳 Apenas Parceladas</span>
+          <span class="fchip" id="chip-ocultadas" title="Filtrar transações ocultadas/desconsideradas das finanças">👁️ Ocultadas</span>
+          <div class="spacer" style="flex:1;"></div>
+          <div id="ext-chips-ativos" style="display:flex; gap:6px; align-items:center;"></div>
+        </div>
+      </div>
+
+      <!-- 3. Raio-X Visual do Período (Timeline + Categorias + Estabelecimentos) -->
+      <div id="ext-painel-analitico" style="margin-bottom:12px;">
+        <div class="ext-analytics-grid">
+          <!-- Card 1: Linha do Tempo -->
+          <div class="panel ext-card-analitico">
+            <h4 style="margin:0 0 10px;">SAÍDA TEMPORAL <span class="muted" style="font-size:11px; text-transform:none;">(clique na barra p/ filtrar)</span></h4>
+            <div class="ext-chart-wrap">
+              <canvas id="ch-ext-meses"></canvas>
+            </div>
+          </div>
+
+          <!-- Card 2: Gastos por Categoria -->
+          <div class="panel ext-card-analitico">
+            <h4 style="margin:0 0 10px;">TOP CATEGORIAS <span class="muted" style="font-size:11px; text-transform:none;">(clique p/ filtrar)</span></h4>
+            <div id="ext-cat-bars" class="ext-scroll-list"></div>
+          </div>
+
+          <!-- Card 3: Maiores Gastos -->
+          <div class="panel ext-card-analitico">
+            <h4 style="margin:0 0 10px;">MAIORES GASTOS <span class="muted" style="font-size:11px; text-transform:none;">(duplo clique edita)</span></h4>
+            <div id="ext-top-gastos" class="ext-scroll-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Master Ledger: Tabela Principal de Transações -->
+      <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; padding-bottom:12px; margin-bottom:10px; border-bottom:1px solid var(--line);">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <h4 style="margin:0;"><span id="ext-titulo">TRANSAÇÕES DO EXTRATO</span></h4>
+            <span class="mono" style="font-size:13px;" id="ext-total-sticky"></span>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <label class="muted" style="font-size:12px;">Agrupar:
+              <select class="fselect" id="ext-agrupar" style="font-size:12.5px; width:auto; padding:4px 8px;">
+                <option value="">Lista cronológica</option>
+                <option value="dia">Por dia</option>
+                <option value="categoria">Por categoria</option>
+                <option value="estabelecimento">Por estabelecimento</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div id="ext-agrupado"></div>
+        <table id="ext-table">
+          <thead>
+            <tr>
+              <th style="width:85px;">Data</th>
+              <th>Descrição</th>
+              <th style="width:130px;">Conta / Fonte</th>
+              <th style="width:130px;">Categoria</th>
+              <th style="width:90px;">Natureza</th>
+              <th style="width:110px; text-align:right;">Valor</th>
+              <th style="width:110px; text-align:right;" id="th-saldo-apos">Saldo Após</th>
+              <th style="width:45px; text-align:center;"></th>
+            </tr>
+          </thead>
+          <tbody id="ext-tbody"></tbody>
+        </table>
+
+        <div id="ext-empty" style="display:none; text-align:center; padding:50px 20px; color:var(--muted);">
+          <div style="font-size:40px; margin-bottom:10px;">🔍</div>
+          <b style="font-size:16px; color:var(--txt);">Nenhuma transação encontrada com os filtros ativos</b>
+          <div style="margin-top:8px; font-size:13px;">Tente limpar os filtros ou selecionar outro período.</div>
+        </div>
+      </div>
+
+      <!-- Diálogo de Edição de Transação -->
+      <dialog id="dlg-edicao-tx">
+        <form method="dialog" id="form-edicao-tx">
+          <h3>Editar transação</h3>
+          <div style="background:var(--panel2); padding:10px 14px; border-radius:9px; margin-bottom:14px; font-size:13.5px;" id="ed-resumo"></div>
+          <label>Categoria
+            <select name="categoria" id="ed-categoria"></select>
+          </label>
+          <label>Natureza
+            <select name="natureza" id="ed-natureza">
+              <option value="gasto">Gasto (Despesa real)</option>
+              <option value="transferencia">⚡ Pagamento de fatura (Neutro — não afeta totais)</option>
+              <option value="transferencia-propria">🔄 Transferência entre contas (Neutro — não afeta totais)</option>
+              <option value="ignorado">👁️ Ocultar transação (Neutro — não afeta totais)</option>
+              <option value="entrada">Entrada / Recebimento</option>
+              <option value="salario">Salário / Renda</option>
+              <option value="rendimento">Rendimento de aplicação</option>
+            </select>
+          </label>
+          <div id="ed-aviso-natureza" class="insight warn" style="display:none; margin-bottom:12px;">
+            <span class="ico">⚠️</span><div class="txt"><span>Ao mudar a natureza para <b>gasto</b> ou <b>transferencia</b>, você afeta as projeções e totais de despesas.</span></div>
+          </div>
+          <label>Observação
+            <input name="observacao" placeholder="nota pessoal opcional">
+          </label>
+          <div style="margin:10px 0 14px;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+              <input type="checkbox" id="ed-salvar-regra" checked style="width:auto;">
+              <span>Criar regra automática para transações futuras com esta descrição</span>
+            </label>
+          </div>
+          <menu>
+            <button type="button" onclick="this.closest('dialog').close()">Cancelar</button>
+            <button type="button" class="cta" id="ed-salvar">Salvar Alterações</button>
+          </menu>
+        </form>
+      </dialog>
+    </section>
+
+    <!-- ================= PROJEÇÃO ================= -->
+    <section id="view-projecao" hidden>
+      <!-- hero: comprometimento e metas de alívio -->
+      <div class="proj-hero" id="proj-hero"></div>
+
+      <!-- simulador "Posso comprar?" -->
+      <div class="panel" style="margin-bottom:12px; background:linear-gradient(135deg, rgba(77,171,255,.06), rgba(0,214,143,.04)); border:1px solid rgba(77,171,255,.25);">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+          <h4 style="margin:0; display:flex; align-items:center; gap:8px;">
+            <span>🔮 SIMULADOR: POSSO COMPRAR?</span>
+            <span class="muted" style="font-size:11px; text-transform:none; letter-spacing:0; font-weight:normal;">simule o impacto de um novo parcelamento ou gasto no seu fluxo de caixa dos próximos 12 meses</span>
+          </h4>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:14px; align-items:flex-end;">
+          <div>
+            <label class="muted" style="font-size:11px; display:block; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">Valor Total da Compra (R$)</label>
+            <input type="number" id="sim-valor" class="fselect" style="width:100%; font-family:'IBM Plex Mono'; font-size:15px; font-weight:600;" placeholder="ex: 1200.00" step="0.01">
+          </div>
+          <div>
+            <label class="muted" style="font-size:11px; display:block; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">Parcelamento</label>
+            <select id="sim-parcelas" class="fselect" style="width:100%; font-size:14px;">
+              <option value="1">1x à vista (Mês seguinte)</option>
+              <option value="2">2x</option>
+              <option value="3">3x</option>
+              <option value="4">4x</option>
+              <option value="5">5x</option>
+              <option value="6">6x</option>
+              <option value="8">8x</option>
+              <option value="10" selected>10x</option>
+              <option value="12">12x</option>
+              <option value="18">18x</option>
+              <option value="24">24x</option>
+            </select>
+          </div>
+          <div>
+            <label class="muted" style="font-size:11px; display:block; margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">Início da Cobrança</label>
+            <select id="sim-inicio" class="fselect" style="width:100%; font-size:14px;"></select>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="cta" id="sim-btn-calcular" style="flex:1; height:38px;">Simular Impacto</button>
+            <button class="ghost" id="sim-btn-limpar" style="height:38px;" title="Limpar simulação">✕</button>
+          </div>
+        </div>
+        <div id="sim-resultado" style="margin-top:14px; display:none;"></div>
+      </div>
+
+      <!-- gráfico full-width + camadas explicadas -->
+      <div class="panel" style="margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+          <h4 style="margin:0;">COMPROMETIMENTO FUTURO <span class="muted" style="font-size:11px; text-transform:none">12 meses · barras = saída estimada · linha = renda · <b style="color:var(--green)">clique em qualquer barra para abrir o Raio-X 360° do mês</b></span></h4>
+        </div>
+        <canvas id="ch-proj" class="chart-proj"></canvas>
+        <div class="proj-legend" id="proj-legend"></div>
+        <div class="proj-camadas" id="proj-camadas"></div>
+      </div>
+
+      <!-- calendário de liberação das dívidas -->
+      <div class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+          <h4 style="margin:0;">CALENDÁRIO DE LIBERAÇÃO DAS DÍVIDAS <span class="muted" style="font-size:11px; text-transform:none" id="proj-dividas-resumo"></span></h4>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <div class="filters" style="margin-bottom:0;" id="proj-filtros-chips">
+              <span class="fchip on" data-filtro="todas">Todas</span>
+              <span class="fchip" data-filtro="cartao">Cartão</span>
+              <span class="fchip" data-filtro="externo">Externas</span>
+              <span class="fchip" data-filtro="3m">≤ 3 meses</span>
+            </div>
+            <input type="search" id="proj-dividas-busca" class="fselect" placeholder="buscar contrato…" style="width:180px;">
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Contrato</th>
+              <th>Tipo</th>
+              <th>Restam</th>
+              <th>Valor/mês</th>
+              <th>Saldo Restante</th>
+              <th>Progresso</th>
+              <th>Termina</th>
+              <th>Alívio Mensal</th>
+            </tr>
+          </thead>
+          <tbody id="proj-dividas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ================= MÊS ================= -->
+    <section id="view-mes" hidden>
+      <div class="filters" style="margin-bottom:12px;">
+        <button class="cta" id="btn-novo-lanc">+ Novo lançamento</button>
+        <select class="fselect" id="mes-select2"></select>
+        <input type="search" id="mes-busca" class="fselect" placeholder="buscar conta…" style="width:170px;">
+        <select class="fselect" id="mes-filtro-status" style="width:auto;">
+          <option value="todas">Todas as contas</option>
+          <option value="abertas">Em aberto</option>
+          <option value="pagas">Pagas</option>
+          <option value="sem-cartao">Ocultar cartões</option>
+          <option value="so-cartao">Apenas cartões</option>
+        </select>
+        <button class="ghost" id="btn-auto-conciliar-mes" title="Localiza e vincula pagamentos no extrato bancário automaticamente">⚡ Conciliar com extrato</button>
+        <span class="muted" id="mes-resumo" style="font-size:12.5px;"></span>
+      </div>
+      <div class="panel">
+        <table id="tbl-mes">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Descrição / Pagamento</th>
+              <th>Valor</th>
+              <th>Vencimento</th>
+              <th>Categoria</th>
+              <th style="text-align:right">Ações</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <dialog id="dlg-lanc">
+        <form method="dialog" id="form-lanc">
+          <h3 id="dlg-title" style="margin-bottom:14px;">Novo lançamento</h3>
+          <label>Descrição<input name="descricao" required placeholder="Ex: Aluguel, Unimed, Dentista"></label>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label>Valor (R$)<input name="valor" type="number" step="0.01" required placeholder="0,00"></label>
+            <label>Vencimento<input name="vencimento" type="date" required></label>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label>Categoria<select name="categoria" id="f-categoria"></select></label>
+            <label>Parcela<input name="parcela" placeholder="ex: 2/12 (opcional)"></label>
+          </div>
+          <label>Observação<input name="observacao" placeholder="Anotações opcionais"></label>
+          <label class="chk" style="margin-top:6px;"><input type="checkbox" name="pago"> Pago</label>
+          <menu style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+            <button type="button" onclick="this.closest('dialog').close()">Cancelar</button>
+            <button class="cta" id="btn-salvar-lanc" type="submit">Salvar</button>
+          </menu>
+        </form>
+      </dialog>
+    </section>
+
+    <!-- ================= RECORRENTES ================= -->
+    <section id="view-recorrentes" hidden>
+      <div class="filters" style="margin-bottom:12px;">
+        <button class="cta" id="btn-novo-rec">+ Nova recorrência</button>
+        <button class="ghost" id="btn-gerar-mes" title="Gera as contas do próximo mês a partir das recorrências ativas">Gerar próximo mês</button>
+        <input type="search" id="rec-busca" class="fselect" placeholder="buscar descrição ou padrão…" style="flex:1; min-width:180px; max-width:280px;">
+        <select class="fselect" id="rec-filtro-status" style="width:auto;">
+          <option value="todas">Todas</option>
+          <option value="ativas" selected>Ativas</option>
+          <option value="inativas">Pausadas</option>
+        </select>
+        <span class="muted" id="rec-resumo" style="font-size:12.5px;"></span>
+        <span class="muted" id="rec-gerar-status" style="font-size:12.5px;"></span>
+      </div>
+      <div class="panel">
+        <table id="tbl-rec">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Descrição</th>
+              <th>Valor</th>
+              <th>Venc.</th>
+              <th>Categoria</th>
+              <th>Tipo</th>
+              <th>Parcela / Freq</th>
+              <th>Forma</th>
+              <th>Padrão Extrato</th>
+              <th style="text-align:right">Ações</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <dialog id="dlg-rec">
+        <form method="dialog" id="form-rec">
+          <h3 id="dlg-rec-title" style="margin-bottom:14px;">Nova recorrência</h3>
+          <label>Descrição<input name="descricao" required placeholder="Ex: Aluguel, Condomínio, IPTU"></label>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label>Valor (R$)<input name="valor" type="number" step="0.01" placeholder="0,00"></label>
+            <label>Dia de vencimento (1-31)<input name="dia_venc" type="number" min="1" max="31" placeholder="Dia do mês"></label>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label>Categoria<select name="categoria" id="fr-categoria"></select></label>
+            <label>Forma de pagamento<select name="forma"><option value="">—</option><option>PIX</option><option>Boleto</option><option>Débito</option><option>Cartão</option><option>Transferência</option></select></label>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <label>Tipo<select name="tipo" id="fr-tipo"><option value="Recorrente">Recorrente (fixa mensal)</option><option value="Parcelado">Parcelado</option><option value="Eventual">Eventual</option></select></label>
+            <label>Periodicidade (meses)<input name="periodicidade" id="fr-periodicidade" type="number" min="1" value="1" title="1 = todo mês, 2 = bimestral, 3 = trimestral, 12 = anual"></label>
+          </div>
+          <div id="rec-grupo-parcelas" style="display:none; grid-template-columns:1fr 1fr; gap:10px; background:var(--panel2); padding:10px 12px; border-radius:8px; margin-bottom:10px;">
+            <label style="margin:0">Total de parcelas<input name="total_parcelas" type="number" min="1" placeholder="Ex: 10"></label>
+            <label style="margin:0">Parcela atual<input name="parcela_atual" type="number" min="0" placeholder="Ex: 1"></label>
+          </div>
+          <div id="rec-grupo-data-base" style="display:none; background:var(--panel2); padding:10px 12px; border-radius:8px; margin-bottom:10px;">
+            <label style="margin:0">Mês base de início (AAAA-MM)<input name="data_base" type="text" placeholder="Ex: 2026-01"></label>
+          </div>
+          <label>Padrão no extrato (conciliação automática)
+            <input name="padrao_busca" placeholder="Ex: FORTE IMOBILIARIA, ENERGISA, CONDOMINIO">
+            <span class="muted" style="font-size:11px; display:block; margin-top:2px;">Texto/termo que identifica o débito no extrato bancário para baixa automática.</span>
+          </label>
+          <label>Observação / anotações
+            <input name="observacao" placeholder="Anotações opcionais (contrato, telefone, conta, etc)">
+          </label>
+          <label class="chk" style="margin-top:6px;"><input type="checkbox" name="ativo" checked> Ativo (considerar na geração mensal e projeções)</label>
+          <menu style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+            <button type="button" onclick="this.closest('dialog').close()">Cancelar</button>
+            <button class="cta" type="submit">Salvar</button>
+          </menu>
+        </form>
+      </dialog>
+    </section>
+
+    <!-- ================= COMPRAS ================= -->
+    <section id="view-compras" hidden>
+      <div class="filters">
+        <input type="search" id="comp-busca" class="fselect" placeholder="buscar estabelecimento…" style="flex:1; min-width:200px;">
+        <select class="fselect" id="comp-status" style="width:auto;">
+          <option value="">Todas</option>
+          <option value="paralelas">Paralelas (revisar)</option>
+        </select>
+        <span class="muted" id="comp-resumo"></span>
+      </div>
+      <div class="panel">
+        <table id="tbl-compras">
+          <thead><tr><th>Estabelecimento</th><th>Valor/parcela</th><th>Parcelas</th><th>Início</th><th>Fonte</th><th>Progresso</th><th>Evidências</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <dialog id="dlg-compra">
+        <div style="min-width:520px;">
+          <h3 id="comp-dlg-titulo" style="margin-bottom:14px;"></h3>
+          <div id="comp-dlg-corpo"></div>
+          <menu style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
+            <button type="button" class="ghost" onclick="this.closest('dialog').close()">Fechar</button>
+          </menu>
+        </div>
+      </dialog>
+    </section>
+
+    <!-- ================= IMPORTAR ================= -->
+    <section id="view-importar" hidden>
+      <div class="panel" style="margin-bottom:16px;">
+        <h4>CONCILIAÇÃO BANCÁRIA <span class="muted" style="font-size:12px; text-transform:none; letter-spacing:0">cruza o extrato importado com suas contas em aberto</span></h4>
+        <div id="conc-sugestoes"></div>
+        <div id="conc-vencidos"></div>
+        <div style="text-align:right; margin-top:10px;"><button class="ghost" onclick="carregarConciliacao()">🔄 Recarregar conciliação</button></div>
+      </div>
+
+      <div class="grid g23">
+        <div class="panel">
+          <h4>⬆ IMPORTAR FATURAS E EXTRATOS (PDF)</h4>
+          <p class="muted" style="margin-bottom:16px;">Arraste os PDFs das faturas (Nubank, Itaú, Mercado Pago) ou extratos (Itaú conta). O sistema detecta o formato, deduplica por transação, categoriza e atualiza tudo — depois gera sugestões de conciliação pra você aprovar.</p>
+          <label class="cta" style="display:inline-block; cursor:pointer;">
+            Selecionar PDFs
+            <input type="file" id="file-pdf" accept=".pdf" multiple hidden>
+          </label>
+          <div id="import-log" style="margin-top:16px; font-family:'IBM Plex Mono'; font-size:12px; color:var(--muted);"></div>
+        </div>
+        <div class="panel">
+          <h4>COMO FUNCIONA (MULTI-FONTE)</h4>
+          <p class="muted" style="margin-bottom:12px;"><b>2 caminhos de entrada:</b><br>
+          <b>AUVP (open banking):</b> sync diário automático puxa contas, transações e parcelas agendadas — a prévia acima mostra o que é igual (vínculo), duvidoso (IA decide) ou novo (só entra com sua aprovação).<br>
+          <b>PDFs:</b> fatura fecha → baixa → importa aqui; dedupe por hash + conciliação com as contas.</p>
+          <p class="muted" style="margin-bottom:12px;">O reconciliador garante que o <b>mesmo gasto nunca entra 2x</b> quando aparece nas duas fontes (iFood no PDF do Nubank × AUVP gold).</p>
+          <p class="muted">O sistema aprende: ao aprovar "DA REC FED = Leão IRPF", nunca mais pergunta.</p>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:12px;">
+        <h4>PADRÕES APRENDIDOS <span class="muted" style="font-size:12px; text-transform:none">confirmações passadas — o sistema não pergunta de novo</span></h4>
+        <table><thead><tr><th>Padrão no extrato</th><th>Corresponde a</th><th>Confirmações</th></tr></thead><tbody id="conc-padroes"></tbody></table>
+      </div>
+      <div class="panel" style="margin-top:12px;">
+        <h4>HISTÓRICO DE IMPORTAÇÕES</h4>
+        <table><thead><tr><th>Data</th><th>Arquivo</th><th>Tipo</th><th>Linhas</th></tr></thead><tbody id="imp-hist"></tbody></table>
+      </div>
+    </section>
+
+    <!-- ================= RECONCILIAR ================= -->
+    <section id="view-reconciliar" hidden>
+      <!-- Cockpit Toolbar de sincronização e período -->
+      <div class="panel" style="margin-bottom:14px; padding:16px 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:14px;">
+          <div>
+            <h4 style="margin:0; display:flex; align-items:center; gap:8px;">
+              <span>🔄 SINCRONIZAÇÃO & RECONCILIAÇÃO MULTI-FONTE</span>
+              <span class="muted" style="font-size:11.5px; text-transform:none; letter-spacing:0; font-weight:normal;">conecta Open Finance (AUVP) e faturas de cartão sem duplicações</span>
+            </h4>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="cta" id="rec-btn-sync-auvp" title="Puxar novas transações do Open Finance na AUVP" style="display:flex; align-items:center; gap:6px; background:var(--blue); border-color:var(--blue); color:#fff;">
+              <span>🔄 Puxar dados da AUVP</span>
+            </button>
+            <span id="rec-sync-status" class="muted" style="font-size:12px;"></span>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; background:var(--panel2); padding:10px 14px; border-radius:10px; border:1px solid var(--line);">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span class="muted" style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Período:</span>
+            <button class="ghost rec-chip-periodo" id="rec-p-7d">7 dias</button>
+            <button class="ghost rec-chip-periodo" id="rec-p-15d">15 dias</button>
+            <button class="ghost rec-chip-periodo on" id="rec-p-mes">Mês atual</button>
+            <button class="ghost rec-chip-periodo" id="rec-p-anterior">Mês anterior</button>
+            <span class="rec-sep" style="width:1px; height:18px; background:var(--line); margin:0 4px;"></span>
+            <input type="date" id="rec-de" class="fselect rec-date" style="padding:4px 8px; font-size:12.5px;">
+            <span class="rec-arrow" style="color:var(--muted)">→</span>
+            <input type="date" id="rec-ate" class="fselect rec-date" style="padding:4px 8px; font-size:12.5px;">
+            <button class="cta" id="rec-previa-btn" style="padding:5px 16px; font-size:13px;">⚡ Analisar Período</button>
+          </div>
+          <span id="rec-status" class="rec-status" style="font-size:13px; font-weight:500;"></span>
+        </div>
+      </div>
+
+      <!-- Resumo: 5 contadores limpos e organizados -->
+      <div class="rec-summary" id="rec-summary" hidden>
+        <div class="rec-sum-card novo" id="card-sum-novos">
+          <div class="num" id="sum-novos">0</div>
+          <div class="lbl">gastos novos<small id="sum-novos-val">compras reais do período</small></div>
+        </div>
+        <div class="rec-sum-card ok" id="card-sum-entradas">
+          <div class="num" id="sum-entradas" style="color:var(--green)">0</div>
+          <div class="lbl">entradas & renda<small id="sum-entradas-val">receitas reais que alimentam o mês</small></div>
+        </div>
+        <div class="rec-sum-card neutro" id="card-sum-neutros">
+          <div class="num" id="sum-neutros" style="color:var(--muted)">0</div>
+          <div class="lbl">faturas & transferências<small id="sum-neutros-val">neutros: não alteram gastos/receitas</small></div>
+        </div>
+        <div class="rec-sum-card fortes" id="card-sum-fortes">
+          <div class="num" id="sum-fortes" style="color:var(--cyan)">0</div>
+          <div class="lbl">já no sistema<small id="sum-fortes-val">vinculados sem duplicar</small></div>
+        </div>
+        <div class="rec-sum-card acao">
+          <div class="num" id="sum-selecao">0</div>
+          <div class="lbl">selecionados<small id="sum-pagas">0 itens para gravação</small></div>
+          <button class="cta" id="rec-aplicar" disabled>Confirmar e Gravar</button>
+        </div>
+      </div>
+
+      <!-- Seletor de visualização (Abas) -->
+      <div class="rec-tabs-bar" id="rec-tabs-bar" hidden style="display:flex; gap:8px; margin-bottom:12px; border-bottom:1px solid var(--line); padding-bottom:8px; flex-wrap:wrap;">
+        <button class="rec-tab-btn active" data-tab="novos" id="tab-btn-novos">💳 Gastos Novos <b id="tab-cnt-novos">0</b></button>
+        <button class="rec-tab-btn" data-tab="neutros" id="tab-btn-neutros">🔄 Faturas & Transferências (Neutros) <b id="tab-cnt-neutros">0</b></button>
+        <button class="rec-tab-btn" data-tab="entradas" id="tab-btn-entradas">💰 Entradas & Salários <b id="tab-cnt-entradas">0</b></button>
+        <button class="rec-tab-btn" data-tab="fracos" id="tab-btn-fracos" style="display:none;">⚠️ Duvidosos <b id="tab-cnt-fracos">0</b></button>
+        <button class="rec-tab-btn" data-tab="fortes" id="tab-btn-fortes">🛡️ Já Conciliados <b id="tab-cnt-fortes">0</b></button>
+      </div>
+
+      <!-- Painel de conteúdo da aba ativa -->
+      <div id="rec-resultado" class="rec-resultado-container"></div>
+
+      <!-- contas do mês: anexar transações já inseridas -->
+      <div class="panel" style="margin-top:20px;">
+        <h4>CONTAS DO MÊS <span class="muted" style="font-size:12px; text-transform:none; letter-spacing:0" id="cmes-resumo">anexe a transação que pagou a conta — vira PAGA com valor real</span></h4>
+        <div id="cmes-lista"></div>
+      </div>
+    </section>
+
+    <!-- ================= CONFIGURAR ================= -->
+    <section id="view-configurar" hidden>
+      <div class="grid g23">
+        <div class="panel" style="grid-column: 1 / -1;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <h4 style="margin:0;">MINHAS CONTAS E CARTÕES (OPEN FINANCE & BANCOS)</h4>
+              <p class="muted" style="margin:4px 0 0; font-size:13px;">Gerencie suas contas e cartões sincronizados via AUVP ou importados. Configure o dia de fechamento e vencimento de cada cartão para o cálculo preciso das faturas abertas.</p>
+            </div>
+            <button class="cta" id="btn-nova-conta" style="padding:6px 14px; font-size:13px;">+ Nova Conta / Cartão</button>
+          </div>
+          <div id="p-contas-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:14px; margin-top:14px;"></div>
+        </div>
+        <div class="panel">
+          <h4>MINHAS RENDAS <span class="muted" style="font-size:12px; text-transform:none; letter-spacing:0">base da projeção — editável</span></h4>
+          <div id="p-rendas"></div>
+          <p class="muted" style="font-size:11px; margin-top:10px;">Defina suas fontes de renda líquida para o cálculo automático das projeções mensais.</p>
+        </div>
+        <div class="panel">
+          <h4>AUVP FINANCEIRO (open banking)</h4>
+          <p class="muted" style="margin-bottom:16px;">Fonte de dados via open banking: sincroniza TODAS as suas contas conectadas (Itaú, Nubank, gold, BTG...), com saldos, transações e parcelas futuras agendadas.</p>
+          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API URL
+            <input id="cfg-auvp-url" class="fselect" style="width:100%; margin-top:5px;" placeholder="https://financas-api.auvp.com.br/mcp">
+          </label>
+          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API Key
+            <input id="cfg-auvp-key" type="password" class="fselect" style="width:100%; margin-top:5px;" placeholder="cole sua api key auvp_...">
+          </label>
+          <div style="display:flex; gap:14px; align-items:center; margin-bottom:14px;">
+            <label class="chk" style="display:flex; align-items:center; gap:8px; font-size:14px; cursor:pointer;">
+              <input type="checkbox" id="cfg-auvp-ativo" style="width:auto;"> Usar AUVP como fonte
+            </label>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="cta" id="cfg-auvp-salvar">Salvar</button>
+            <button class="ghost" id="cfg-auvp-sync">🔄 Sincronizar agora</button>
+            <span id="cfg-auvp-status" class="muted"></span>
+          </div>
+          <div class="muted" id="cfg-auvp-ultimo" style="font-size:12px; margin-top:10px;"></div>
+          <div id="auvp-sync-result" style="margin-top:14px;"></div>
+        </div>
+        <div class="panel">
+          <h4>IA PARA IMPORTAÇÃO (Ollama Cloud)</h4>
+          <p class="muted" style="margin-bottom:16px;">Usada na camada de sugestão do import: transações sem regra são enviadas pra IA categorizar, e você revisa na prévia antes de inserir. Sem API key, o import funciona só com regras.</p>
+          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API Base URL
+            <input id="cfg-ia-url" class="fselect" style="width:100%; margin-top:5px;" placeholder="https://ollama.com">
+          </label>
+          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API Key
+            <input id="cfg-ia-key" type="password" class="fselect" style="width:100%; margin-top:5px;" placeholder="cole sua api key aqui">
+          </label>
+          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">Modelo
+            <input id="cfg-ia-model" class="fselect" style="width:100%; margin-top:5px;" placeholder="ex: gpt-oss:120b">
+          </label>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="cta" id="cfg-ia-salvar">Salvar</button>
+            <button class="ghost" id="cfg-ia-testar">🔌 Testar conexão</button>
+            <span id="cfg-ia-status" class="muted"></span>
+          </div>
+        </div>
+        <div class="panel">
+          <h4>COMO A IA É USADA</h4>
+          <p class="muted" style="margin-bottom:10px;">A ordem de sugestão é sempre: <b>padrão confirmado → regra → IA → manual</b>. A IA nunca sobrescreve regra aprendida, e cada aprovação sua vira regra (a IA é chamada cada vez menos).</p>
+          <p class="muted" style="margin-bottom:10px;"><b>Privacidade:</b> só descrição, valor e data da transação vão na requisição. Nada de saldos, nome ou CPF.</p>
+          <p class="muted">Toggle "usar IA" no import: pode importar com IA desligada quando quiser.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modal-conta" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9999; align-items:center; justify-content:center; padding:16px;">
+  <div class="panel" style="width:480px; max-width:100%; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:0 12px 36px rgba(0,0,0,0.5);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 id="modal-conta-titulo" style="margin:0; font-size:18px;">Configurar Conta / Cartão</h3>
+      <button class="ghost" id="modal-conta-fechar-x" style="padding:4px 8px; border:none; font-size:16px; cursor:pointer;">✕</button>
+    </div>
+    <input type="hidden" id="modal-conta-id">
+    
+    <label style="display:block; margin-bottom:12px; font-size:13px; color:var(--muted);">Nome da Conta ou Cartão
+      <input id="modal-conta-nome" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: Cartão BTG Black">
+    </label>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:12px;">
+      <label style="font-size:13px; color:var(--muted);">Tipo
+        <select id="modal-conta-tipo" class="fselect" style="width:100%; margin-top:5px;">
+          <option value="CREDIT">💳 Cartão de Crédito</option>
+          <option value="BANK">🏦 Conta Bancária</option>
+        </select>
+      </label>
+      <label style="font-size:13px; color:var(--muted);">Instituição (slug)
+        <input id="modal-conta-inst" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: btg, inter, c6">
+      </label>
+    </div>
+
+    <div id="modal-conta-ciclo" style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:12px;">
+      <label style="font-size:13px; color:var(--muted);">Dia Fechamento (1-31)
+        <input id="modal-conta-fech" type="number" min="1" max="31" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: 24">
+      </label>
+      <label style="font-size:13px; color:var(--muted);">Dia Vencimento (1-31)
+        <input id="modal-conta-venc" type="number" min="1" max="31" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: 1">
+      </label>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:16px;">
+      <label style="font-size:13px; color:var(--muted);">Ícone
+        <input id="modal-conta-icone" class="fselect" style="width:100%; margin-top:5px;" placeholder="💳 ou 🏦">
+      </label>
+      <label style="font-size:13px; color:var(--muted);">Cor Visual
+        <input id="modal-conta-cor" type="color" class="fselect" style="width:100%; height:38px; margin-top:5px; padding:2px; cursor:pointer;">
+      </label>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:20px;">
+      <input type="checkbox" id="modal-conta-ativo" style="width:auto; cursor:pointer;">
+      <label for="modal-conta-ativo" style="font-size:14px; cursor:pointer;">Conta / Cartão Ativo</label>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; gap:10px;">
+      <button class="ghost" id="modal-conta-cancelar">Cancelar</button>
+      <button class="cta" id="modal-conta-salvar">Salvar Alterações</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/chart.umd.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

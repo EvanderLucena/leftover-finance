@@ -1,0 +1,11 @@
+node_modules
+*.db
+*.db-*
+*.log
+shots
+mockups
+.env
+cache-*.json
+*.pdf
+*.xlsx
+*.csv

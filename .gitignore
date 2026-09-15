@@ -1,0 +1,87 @@
+# ==============================================================================
+# SEGURANÇA & PRIVACIDADE FINANCEIRA (Zero vazamento de dados pessoais)
+# ==============================================================================
+
+# Bancos de dados locais e backups SQLite
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+app/data/
+data/
+backup-*/
+
+# Extratos, faturas e documentos pessoais
+*.pdf
+*.xlsx
+*.xls
+*.csv
+*.ofx
+*.qif
+Controle Mensal.xlsx
+Mercado Pago/
+itau/
+nubank/
+
+# Cache Open Finance e tokens
+cache-*.json
+cache-auvp.json
+app/cache-*.json
+
+# Notas com histórico e dados financeiros pessoais
+PROJETO.md
+REGRAS.md
+
+# Screenshots e capturas visuais locais
+*.png
+*.jpg
+*.jpeg
+*.webp
+shots/
+app/shots/
+mockups/
+app/mockups/
+.playwright-mcp/
+.planning/
+
+# Node & Dependências
+node_modules/
+app/node_modules/
+
+# Logs do sistema
+*.log
+
+# Segredos e variáveis de ambiente
+.env
+.env.local
+.env.*
+!.env.example
+
+# ==============================================================================
+# Scripts de desenvolvimento / ad-hoc (mantém apenas scripts de produção)
+# ==============================================================================
+app/scripts/*
+!app/scripts/auvp-client.js
+!app/scripts/conciliacao.js
+!app/scripts/contas.js
+!app/scripts/faturas-abertas.js
+!app/scripts/heuristico.js
+!app/scripts/ia.js
+!app/scripts/identidade.js
+!app/scripts/import.js
+!app/scripts/insights-ia.js
+!app/scripts/insights.js
+!app/scripts/motor-regras.js
+!app/scripts/parcelas-futuras.js
+!app/scripts/parse-extrato.js
+!app/scripts/parse-itau.js
+!app/scripts/parse-mercadopago.js
+!app/scripts/parse-nubank.js
+!app/scripts/pdf.js
+!app/scripts/reconciliador.js
+!app/scripts/regras-seed.js
+!app/scripts/renda-realizada.js
+!app/scripts/saldos.js
+!app/scripts/super-parser.js
+!app/scripts/sync-diario.js
+

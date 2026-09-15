@@ -1,0 +1,17 @@
+{
+  "name": "financas",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "import": "node scripts/import.js"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "express": "^4.19.2",
+    "pdf-parse": "^2.4.5",
+    "pdfreader": "^3.0.8",
+    "playwright": "^1.62.1",
+    "xlsx": "^0.18.5"
+  }
+}

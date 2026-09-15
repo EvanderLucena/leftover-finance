@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      FINANCA_DB: /data/financas.db
+      PORT: 3000
+      IA_URL: ${IA_URL:-}
+      IA_KEY: ${IA_KEY:-}
+      IA_MODEL: ${IA_MODEL:-}
+      AUVP_URL: ${AUVP_URL:-}
+      AUVP_KEY: ${AUVP_KEY:-}
+      AUVP_ATIVO: ${AUVP_ATIVO:-0}
+    volumes:
+      - ./data:/data
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      AUTH_USER: ${AUTH_USER:-admin}
+      AUTH_PASS_HASH: ${AUTH_PASS_HASH:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:
