@@ -395,6 +395,58 @@ app.delete('/api/rendas/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Status das rendas do mês (por fonte): estimada × realizada × pendente — alimenta o card da Visão
+app.get('/api/rendas/status', (req, res) => {
+  const { statusPorMes, totalRendaRealizada } = require('./scripts/renda-realizada');
+  const ref = req.query.mes || MES_ATUAL();
+  const [mm, aa] = ref.split('-').map(Number);
+  const mesIso = `${aa}-${String(mm).padStart(2, '0')}`;
+  const itens = statusPorMes(mesIso);
+  res.json({
+    mes: ref, mes_iso: mesIso,
+    itens,
+    estimada_total: Math.round(itens.reduce((s, i) => s + i.estimada, 0) * 100) / 100,
+    realizada_total: Math.round(totalRendaRealizada(mesIso) * 100) / 100,
+    pendente_total: Math.round(itens.reduce((s, i) => s + i.pendente, 0) * 100) / 100
+  });
+});
+
+// Lançar renda manual (ex: Cooper caiu, AUVP ainda não trouxe) — cria transação salario + rendas_realizadas
+app.post(['/api/rendas/lancar-manual', '/api/rendas/lançar-manual'], (req, res) => {
+  const { renda_id, valor, data, observacao } = req.body || {};
+  const r = db.prepare('SELECT * FROM rendas WHERE id=?').get(renda_id);
+  if (!r) return res.status(400).json({ erro: 'renda_id inválido' });
+  const v = Number(valor);
+  if (!isFinite(v) || v <= 0) return res.status(400).json({ erro: 'valor inválido' });
+  const dataIso = (data || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const mesIso = dataIso.slice(0, 7);
+  const descricao = observacao || `${r.nome} (lançamento manual — banco real caiu antes do open finance)`;
+
+  // hash estável de fonte manual para dedupe (re-exportação AUVP da mesma TED casa pela descrição/valor)
+  const hash = `manual-renda-${r.id}-${mesIso}`;
+  const existente = db.prepare('SELECT id FROM transacoes WHERE hash_unico=?').get(hash);
+  if (existente) return res.status(409).json({ erro: 'Renda deste mês já foi lançada manualmente (transação #' + existente.id + ')' });
+
+  let txId = null;
+  db.exec('BEGIN');
+  try {
+    const ins = db.prepare(`INSERT INTO transacoes (data, valor, descricao, natureza, categoria, fonte, hash_unico, observacao)
+      VALUES (?, ?, ?, 'salario', 'Salário', 'manual', ?, ?)`);
+    const rr = ins.run(dataIso, v, descricao, hash, `${r.nome} — lançado manualmente em ${new Date().toISOString().slice(0, 10)} (confirmado pelo usuário antes da AUVP)`);
+    txId = Number(rr.lastInsertRowid);
+    const { gravarRendaRealizada } = require('./scripts/renda-realizada');
+    gravarRendaRealizada(mesIso, r.nome, Math.abs(v), txId);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    return res.status(500).json({ erro: e.message });
+  }
+  res.json({
+    ok: true, transacao_id: txId, mes: mesIso,
+    aviso: 'Se a AUVP trouxer a mesma TED depois, a conciliação marca como idêntica — o hash manual evita dupla contagem em pendentes, mas confira na prévia antes de aprovar'
+  });
+});
+
 // ---------- API: dashboard (agenda/contas do mês) ----------
 app.get('/api/dashboard', (req, res) => {
   const ref = MES_ATUAL();
@@ -1310,8 +1362,15 @@ app.get('/api/visao', async (req, res) => {
     // Cálculo preciso via faturas-abertas (parcelas contratuais + compras do ciclo real dos 3 cartões)
     const faturasAbertasCalculadas = obterFaturasAbertas(dataSimulada);
     const faturaProxima = faturasAbertasCalculadas.total;
-    // entradas pendentes do mês (estimada − realizada) — Cooper ainda por entrar
-    const entradasPendentes = Math.max(0, rendaEstimada - rendaRealizada);
+    // PENDENTES POR FONTE (fix 30/09): renda só é "pendente" se NENHUMA transação dela caiu
+    // no mês. O que caiu (mesmo menor que a estimativa — Magalu c/ empréstimo) é o real, não
+    // completamos pela estimativa. Cooper estimada fica pendente até cair (ou lançar manual).
+    const { statusPorMes } = require('./scripts/renda-realizada');
+    const statusRendas = statusPorMes(mesIso);
+    const entradasPendentes = Math.round(statusRendas.reduce((s, i) => s + i.pendente, 0) * 100) / 100;
+    const pendentesDetalhe = statusRendas.filter(i => i.pendente > 0).map(i => ({
+      renda_id: i.id, nome: i.nome, estimada: i.estimada, padrao_texto: i.padrao_texto
+    }));
 
     const fluxo = gerarFluxo(mesRef);
     const { obterUltimosInsights } = require('./scripts/insights-ia');
@@ -1324,6 +1383,7 @@ app.get('/api/visao', async (req, res) => {
       fatura_proxima: Math.round(faturaProxima * 100) / 100,
       faturas_abertas_detalhe: faturasAbertasCalculadas,
       entradas_pendentes: Math.round(entradasPendentes * 100) / 100,
+      pendentes_detalhe: pendentesDetalhe,
       renda_mes: Math.round(rendaMes * 100) / 100,
       renda_realizada: Math.round(rendaRealizada * 100) / 100,
       comprometido: Math.round(comprometido * 100) / 100,
@@ -1382,12 +1442,14 @@ app.get('/api/extrato-conta', async (req, res) => {
     const saldoConta = todas.find(s => s.nome === cfg.saldoAuvp && s.tipo === cfg.tipo) || todas.find(s => s.nome === cfg.saldoAuvp);
     const saldoAtual = saldoConta ? saldoConta.valor : 0;
     const hj = hoje.toISOString().slice(0, 10);
+    const contaAuvp = cfg.contaAuvp || cfg.contaAUVP || cfg.conta_auvp || null;
     const alts = [];
     const paramsTx = [hj];
-    if (cfg.fontes.length) { alts.push(`fonte IN (${cfg.fontes.map(() => '?').join(',')})`); paramsTx.push(...cfg.fontes); }
-    if (cfg.auvpFonte && cfg.contaAuvp) { alts.push(`(fonte = ? AND conta = ?)`); paramsTx.push(cfg.auvpFonte, cfg.contaAuvp); }
+    const fontesCfg = Array.isArray(cfg.fontes) ? cfg.fontes : [];
+    if (fontesCfg.length) { alts.push(`fonte IN (${fontesCfg.map(() => '?').join(',')})`); paramsTx.push(...fontesCfg); }
+    if (cfg.auvpFonte && contaAuvp) { alts.push(`(fonte = ? AND conta = ?)`); paramsTx.push(cfg.auvpFonte, contaAuvp); }
     const txs = db.prepare(`SELECT id, data, descricao, valor, natureza, categoria, parcela, fonte, conta
-      FROM transacoes WHERE data <= ? AND (${alts.join(' OR ')})
+      FROM transacoes WHERE data <= ? ${alts.length ? 'AND (' + alts.join(' OR ') + ')' : ''}
       ORDER BY data DESC, id DESC`).all(...paramsTx);
     let acumulado = saldoAtual;
     const todasLinhas = txs.map(t => {

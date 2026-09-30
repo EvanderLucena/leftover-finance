@@ -198,6 +198,34 @@ async function loadVisao() {
   }).catch(() => {});
   document.getElementById('top-renda').textContent = fmt(v.renda_mes);
 
+// Renda caiu no banco real antes da AUVP trazer (ex: TED Cooper) — lançamento manual
+window.lançarRendaManual = async function (pendentes) {
+  const lista = typeof pendentes === 'string' ? JSON.parse(pendentes) : (pendentes || []);
+  if (!lista.length) { toast('Nada pendente — todas as rendas deste mês já caíram'); return; }
+  let escolha;
+  if (lista.length === 1) escolha = lista[0].renda_id;
+  else {
+    const opcoes = lista.map((p, i) => `${i + 1}. ${p.nome} (previsto ${fmt(p.estimada)})`).join('\n');
+    const idx = Number(prompt('Qual renda caiu?\n' + opcoes + '\n\nDigite o número:', '1'));
+    if (!idx || !lista[idx - 1]) return;
+    escolha = lista[idx - 1].renda_id;
+  }
+  const item = lista.find(p => p.renda_id === escolha);
+  const valorStr = prompt(`Valor que caiu na conta (${item.nome}):`, String(item.estimada).replace('.', ','));
+  if (valorStr === null) return;
+  const valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
+  if (!isFinite(valor) || valor <= 0) { toast('Valor inválido'); return; }
+  const dataStr = prompt('Data que caiu (AAAA-MM-DD):', new Date().toISOString().slice(0, 10));
+  if (dataStr === null) return;
+  const r = await api('/api/rendas/lancar-manual', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ renda_id: escolha, valor, data: dataStr })
+  }).catch(e => ({ erro: e.message }));
+  if (r.erro) { toast('Erro: ' + r.erro); return; }
+  toast(`✓ ${item.nome} lançado: ${fmt(valor)} em ${dataStr} — renda realizada do mês atualizada`);
+  loadVisao();
+};
+
   // HERO: como estou agora
   const pctDia = Math.min(100, Math.round((new Date().getDate() / 30) * 100));
   const proxIsoLabel = v.mes_iso ? (v.mes_iso.slice(0, 4) + '-' + String(Number(v.mes_iso.slice(5, 7)) % 12 + 1).padStart(2, '0')) : '';
@@ -207,6 +235,10 @@ async function loadVisao() {
   const cItau = (fa.cartoes || []).find(c => c.instituicao === 'itau' || (c.id && c.id.includes('itau')))?.total || 0;
   const cMP = (fa.cartoes || []).find(c => c.instituicao === 'mercadopago' || (c.id && c.id.includes('mp')))?.total || 0;
   const saldoPrevisto = (v.disponivel || 0) + (v.entradas_pendentes || 0) - (v.fatura_proxima || 0);
+  const pendentesDetalhe = v.pendentes_detalhe || [];
+  const pendentes_sub = pendentesDetalhe.length
+    ? pendentesDetalhe.map(p => `${p.nome.replace(/^Salário /i, '')} ${fmt(p.estimada)} (previsto)`).join(' · ')
+    : 'tudo que ia cair neste mês já caiu';
 
   document.getElementById('vc-hero').innerHTML = `
     <div class="vc-main">
@@ -225,7 +257,8 @@ async function loadVisao() {
     <div class="vc-main">
       <span class="lbl">ENTRADAS PENDENTES</span>
       <span class="num ${v.entradas_pendentes > 0 ? 'up' : 'neutral'}">${fmt(v.entradas_pendentes)}</span>
-      <span class="sub muted">Salários e rendas previstos para este mês</span>
+      <span class="sub muted">${pendentes_sub}</span>
+      ${v.entradas_pendentes > 0 ? `<button type="button" class="ghost" style="margin-top:6px; padding:4px 10px; font-size:11.5px;" onclick="lançarRendaManual(${JSON.stringify(v.pendentes_detalhe || []).replace(/"/g, '&quot;')})">💸 Caiu no banco? Lançar agora</button>` : ''}
     </div>
     <div class="vc-main ${saldoPrevisto >= 0 ? 'sobra' : 'estouro'}">
       <span class="lbl">SALDO PREVISTO APÓS FATURAS</span>
