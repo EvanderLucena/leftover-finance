@@ -435,7 +435,10 @@ app.post(['/api/rendas/lancar-manual', '/api/rendas/lançar-manual'], (req, res)
     const rr = ins.run(dataIso, v, descricao, hash, `${r.nome} — lançado manualmente em ${new Date().toISOString().slice(0, 10)} (confirmado pelo usuário antes da AUVP)`);
     txId = Number(rr.lastInsertRowid);
     const { gravarRendaRealizada } = require('./scripts/renda-realizada');
-    gravarRendaRealizada(mesIso, r.nome, Math.abs(v), txId);
+    // nome específico da fonte: 'Salário Coopersystem' → 'Coopersystem' (colide menos em UNIQUE(mes,descricao)
+    // com futuros registros da AUVP/PDF, que usam a regra detectada 'Cooper')
+    const nomeFonte = r.nome.replace(/^Salário\s+/i, '');
+    gravarRendaRealizada(mesIso, descricao, Math.abs(v), txId, nomeFonte);
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
@@ -1785,13 +1788,21 @@ app.post('/api/reconciliacao/previa', async (req, res) => {
     }
 
     const resultado = reconciliarLote(loteNeg, 'auvp-mcp', { dryRun: true, porFonte: true });
+    // ENTRADAS: dedupe contra transações existentes — INCLUSIVE lançamentos manuais de renda
+    // (fonte='manual', hash 'manual-renda-*'). Casamento por valor exato + data ±3d independente
+    // da descrição (ex: TED Cooper AUVP 'TED 136.1720...' × manual 'Salário Coopersystem (lançamento...)')
     const entradasNovas = lotePos.filter(t => {
       const jaExiste = db.prepare(`
-        SELECT id FROM transacoes 
-        WHERE hash_unico = ? 
+        SELECT id, fonte FROM transacoes
+        WHERE hash_unico = ?
            OR (valor = ? AND data BETWEEN date(?, '-1 day') AND date(?, '+1 day'))
-      `).get(t.hash_unico, t.valor, t.data, t.data);
-      return !jaExiste;
+           OR (valor = ? AND data = ? AND natureza IN ('salario','entrada') AND fonte = 'manual')
+      `).get(t.hash_unico, t.valor, t.data, t.data, t.valor, t.data);
+      if (jaExiste) {
+        t.ja_lancada = { id: jaExiste.id, fonte: jaExiste.fonte };
+        return false;
+      }
+      return true;
     });
     resultado.entradas = entradasNovas;
     resultado.neutros = neutros.filter(n => !n.ja_existe);

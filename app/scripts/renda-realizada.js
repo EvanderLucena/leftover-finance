@@ -33,9 +33,14 @@ function detectarRenda(descricao) {
 }
 
 // grava a renda realizada do mês (upsert) + retorna a soma do mês
-function gravarRendaRealizada(mes, descricao, valor, transacaoId) {
+// descricaoNome: nome específico da fonte (ex: 'Coopersystem', 'Magalu') — se não vier,
+// detecta pela descrição; nunca gravar 'Salário' genérico (UNIQUE(mes,descricao) colidiria)
+function gravarRendaRealizada(mes, descricao, valor, transacaoId, descricaoNome = null) {
   const r = detectarRenda(descricao);
-  const nome = r ? r.fonte : descricao.slice(0, 40);
+  const nome = descricaoNome
+    || (r && r.fonte !== 'Salário' ? r.fonte : null)
+    || ((descricao || '').length <= 40 ? descricao : null)
+    || (r ? r.fonte : (descricao || '').slice(0, 40));
   db.prepare(`INSERT INTO rendas_realizadas (mes, descricao, valor, transacao_id)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(mes, descricao) DO UPDATE SET valor=excluded.valor, transacao_id=excluded.transacao_id`)
