@@ -160,7 +160,11 @@ function gerarInsights() {
   return insights;
 }
 
-// fluxo do mês — faturas reais de cartão + fixos + parcelados + gastos variáveis vs renda
+// fluxo do mês — fixos + parcelados + gastos variáveis vs renda
+// DECISÃO 30/09/2026 (Evander): faturas de cartão NÃO são saída no fluxo — pagamento de fatura
+// é dinheiro se movendo entre contas do próprio usuário (conta ↔ cartão), e o gasto real de cada
+// compra já é contado no mês da COMPRA (gastoReal abaixo). Contar a fatura no mês de vencimento
+// dobraria o gasto e puniria o mês com déficit falso (set/26: −3.217 vira +4.595 de sobra).
 function gerarFluxo(mesRef = null) {
   const ref = mesRef || db.prepare("SELECT valor FROM config WHERE chave='mes_atual'").get()?.valor || '09-2026';
   const [mM, yY] = ref.split('-');
@@ -176,7 +180,7 @@ function gerarFluxo(mesRef = null) {
   } catch(e) {}
   const renda = Math.max(rendaEstimada, rendaRealizada) || 14986.17;
 
-  // 2. Contas do mês (lancamentos)
+  // 2. Contas do mês (lancamentos) — faturas de cartão EXCLUÍDAS (pagamento interno)
   const mesRow = db.prepare('SELECT id FROM meses WHERE ref=?').get(ref);
   let fixos = 0;
   let faturasCartao = 0;
@@ -191,7 +195,7 @@ function gerarFluxo(mesRef = null) {
 
     for (const l of lancs) {
       if (l.cat === 'Cartões') {
-        faturasCartao += l.valor;
+        faturasCartao += l.valor; // rastreado p/ contexto, mas FORA da saída (decisão 30/09)
       } else if (l.parcela || (l.cat === 'Dívida' && l.descricao !== 'Condomínio')) {
         parcelas += l.valor;
       } else {
@@ -201,7 +205,7 @@ function gerarFluxo(mesRef = null) {
   }
 
   // Fallback para meses sem lançamentos salvos
-  if (!mesRow || (fixos + faturasCartao + parcelas === 0)) {
+  if (!mesRow || (fixos + parcelas === 0)) {
     fixos = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM recorrencias WHERE ativo=1 AND tipo='Recorrente' AND categoria_id != (SELECT id FROM categorias WHERE nome='Cartões')").get().t;
     parcelas = db.prepare(`
       SELECT COALESCE(SUM(valor),0) t FROM recorrencias
@@ -214,6 +218,7 @@ function gerarFluxo(mesRef = null) {
   }
 
   // 3. Gastos variáveis reais do mês (à vista, PIX e débito fora de contas e parcelas)
+  //    — aqui mora o gasto REAL do mês, incluindo as compras de cartão do mês (data da compra)
   const gastoReal = db.prepare(`
     SELECT COALESCE(SUM(ABS(valor)),0) tot FROM transacoes t
     WHERE t.natureza='gasto' AND substr(t.data,1,7)=?
@@ -221,60 +226,61 @@ function gerarFluxo(mesRef = null) {
       AND t.id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)
       AND t.id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas)`).get(mesIso).tot;
 
-  const totalSaidas = fixos + faturasCartao + parcelas + gastoReal;
+  // Saída efetiva: fixos + parcelas + gasto real (sem faturas — pagamento interno não sai)
+  const totalSaidas = fixos + parcelas + gastoReal;
   const saldoFinal = renda - totalSaidas;
   const pctComprometido = renda > 0 ? Math.round((totalSaidas / renda) * 100) : 0;
   const pct = v => renda > 0 ? Math.round((v / renda) * 1000) / 10 : 0;
 
   return [
-    { 
-      nome: 'Renda líquida', 
+    {
+      nome: 'Renda líquida',
       icone: '💵',
-      valor: Math.round(renda * 100) / 100, 
-      cor: 'green', 
+      valor: Math.round(renda * 100) / 100,
+      cor: 'green',
       pct: 100,
       detalhe: rendaRealizada > 0 ? `R$ ${rendaRealizada.toFixed(2)} realizada` : 'Estimada'
     },
-    { 
-      nome: 'Faturas de cartão', 
-      icone: '💳',
-      valor: Math.round(faturasCartao * 100) / 100, 
-      cor: 'red', 
-      pct: pct(faturasCartao),
-      detalhe: 'Nubank, Itaú, Mercado Pago'
-    },
-    { 
-      nome: 'Fixos & moradia', 
+    {
+      nome: 'Fixos & moradia',
       icone: '🏠',
-      valor: Math.round(fixos * 100) / 100, 
-      cor: 'blue', 
+      valor: Math.round(fixos * 100) / 100,
+      cor: 'blue',
       pct: pct(fixos),
       detalhe: 'Aluguel, energia, internet, saúde'
     },
-    { 
-      nome: 'Parcelas & dívidas', 
+    {
+      nome: 'Parcelas & dívidas',
       icone: '⚖️',
-      valor: Math.round(parcelas * 100) / 100, 
-      cor: 'amber', 
+      valor: Math.round(parcelas * 100) / 100,
+      cor: 'amber',
       pct: pct(parcelas),
       detalhe: 'Leão, IPTU, financiamentos'
     },
-    { 
-      nome: 'Variável dia a dia', 
+    {
+      nome: 'Gasto do dia a dia',
       icone: '🛒',
-      valor: Math.round(gastoReal * 100) / 100, 
-      cor: 'purple', 
+      valor: Math.round(gastoReal * 100) / 100,
+      cor: 'purple',
       pct: pct(gastoReal),
-      detalhe: 'PIX, débito, compras avulsas'
+      detalhe: 'Mesmo mes de consumo: PIX, débito, compras à vista E cartão (data real da compra)'
     },
-    { 
-      nome: saldoFinal >= 0 ? 'Sobra livre' : 'Déficit / Pressão', 
+    {
+      nome: saldoFinal >= 0 ? 'Sobra livre' : 'Déficit / Pressão',
       icone: saldoFinal >= 0 ? '💰' : '⚠️',
-      valor: Math.round(Math.abs(saldoFinal) * 100) / 100, 
+      valor: Math.round(Math.abs(saldoFinal) * 100) / 100,
       negativo: saldoFinal < 0,
-      cor: saldoFinal >= 0 ? 'green' : 'red', 
+      cor: saldoFinal >= 0 ? 'green' : 'red',
       pct: pct(Math.abs(saldoFinal)),
       detalhe: saldoFinal >= 0 ? 'Livre para poupar/investir' : `${pctComprometido}% da renda comprometida`
+    },
+    {
+      nome: 'Faturas pagas (interna)',
+      icone: '🔁',
+      valor: Math.round(faturasCartao * 100) / 100,
+      cor: 'muted',
+      pct: pct(faturasCartao),
+      detalhe: 'Pagamento de fatura = dinheiro entre suas contas, não é saída (gasto real já contado no mês da compra)'
     }
   ];
 }

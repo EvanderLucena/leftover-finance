@@ -307,7 +307,7 @@ window.lançarRendaManual = async function (pendentes) {
     red: '#ff4d5e'
   };
 
-  const sobraItem = f[f.length - 1];
+  const sobraItem = f[f.length - 2]; // penúltimo: 'Sobra livre'/'Déficit' (última é a linha informativa de faturas)
   const elStatus = document.getElementById('flow-badge-status');
   if (elStatus && sobraItem) {
     if (sobraItem.negativo) {
@@ -321,7 +321,7 @@ window.lançarRendaManual = async function (pendentes) {
   if (elFluxo) {
     elFluxo.innerHTML = f.map((row, i) => {
       const isRenda = i === 0;
-      const isSobra = i === f.length - 1;
+      const isSobra = i === f.length - 2;
       const corFundo = cores[row.cor] || 'var(--muted)';
       const corTexto = isRenda ? 'var(--txt)' : (isSobra ? (row.negativo ? 'var(--red)' : 'var(--green)') : 'var(--txt)');
       const sinal = isSobra ? (row.negativo ? '−' : '+') : '';
@@ -345,25 +345,25 @@ window.lançarRendaManual = async function (pendentes) {
   }
 
   // Rodapé do fluxo com barra segmentada empilhada
+  // (faturas de cartão não são saída — pagamento interno; aparecem como linha informativa 🔁)
   const elRodape = document.getElementById('flow-resumo-rodape');
   if (elRodape && f.length >= 5) {
-    const fat = f[1] || { pct: 0, valor: 0 };
-    const fix = f[2] || { pct: 0, valor: 0 };
-    const par = f[3] || { pct: 0, valor: 0 };
-    const varG = f[4] || { pct: 0, valor: 0 };
-    const totSaidas = fat.valor + fix.valor + par.valor + varG.valor;
+    const fix = f[1] || { pct: 0, valor: 0 };
+    const par = f[2] || { pct: 0, valor: 0 };
+    const varG = f[3] || { pct: 0, valor: 0 };
+    const fat = f[5] || { pct: 0, valor: 0 };
+    const totSaidas = fix.valor + par.valor + varG.valor;
     const pctTotal = Math.round((totSaidas / (f[0].valor || 1)) * 100);
 
     elRodape.innerHTML = `
       <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--line);">
-        <div style="display:flex; height:6px; border-radius:3px; overflow:hidden; gap:2px; margin-bottom:8px; background:rgba(255,255,255,0.04);" title="Distribuição das Saídas">
-          <div style="width:${Math.min(100, fat.pct)}%; background:var(--red);" title="Cartões: ${fat.pct}% (${fmt(fat.valor)})"></div>
+        <div style="display:flex; height:6px; border-radius:3px; overflow:hidden; gap:2px; margin-bottom:8px; background:rgba(255,255,255,0.04);" title="Distribuição das Saídas (faturas de cartão não somam — pagamento interno)">
           <div style="width:${Math.min(100, fix.pct)}%; background:var(--blue);" title="Fixos: ${fix.pct}% (${fmt(fix.valor)})"></div>
           <div style="width:${Math.min(100, par.pct)}%; background:var(--amber);" title="Parcelas: ${par.pct}% (${fmt(par.valor)})"></div>
-          <div style="width:${Math.min(100, varG.pct)}%; background:#b388ff;" title="Variável: ${varG.pct}% (${fmt(varG.valor)})"></div>
+          <div style="width:${Math.min(100, varG.pct)}%; background:#b388ff;" title="Gasto dia a dia: ${varG.pct}% (${fmt(varG.valor)})"></div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--muted); flex-wrap:wrap; gap:6px;">
-          <span>Saídas: <b style="color:var(--txt);">${fmt(totSaidas)}</b> <span class="mono" style="font-size:11px;">(${pctTotal}% da renda)</span></span>
+          <span>Saídas: <b style="color:var(--txt);">${fmt(totSaidas)}</b> <span class="mono" style="font-size:11px;">(${pctTotal}% da renda)</span>${fat.valor ? ` <span class="mono" style="font-size:10.5px; opacity:.7;" title="Pagamento de fatura é dinheiro entre suas contas — gasto real já contado no mês da compra">· 🔁 faturas pagas ${fmt(fat.valor)} (interna)</span>` : ''}</span>
           <span>${sobraItem?.negativo ? `<b style="color:var(--red);">Déficit: −${fmt(sobraItem.valor)}</b>` : `<b style="color:var(--green);">Sobra: +${fmt(sobraItem?.valor || 0)}</b>`}</span>
         </div>
       </div>`;
