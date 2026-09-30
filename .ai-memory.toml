@@ -1,0 +1,3 @@
+# ai-memory scope for this repository (static MCP clients route by these names)
+workspace = "default"
+project = "Finanças"
