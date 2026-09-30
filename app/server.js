@@ -2036,7 +2036,7 @@ app.get('/api/extratos/saida-mensal', (req, res) => {
 });
 
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4321;
 app.listen(PORT, () => console.log(`Finanças app rodando em http://localhost:${PORT}`));
 
 require('./scripts/sync-diario').iniciarSyncDiario();
