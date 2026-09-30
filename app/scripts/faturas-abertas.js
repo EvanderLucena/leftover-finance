@@ -49,7 +49,8 @@ function obterFaturasAbertas(dataReferencia = null) {
         SELECT COALESCE(SUM(c.valor_parcela), 0) as tot
         FROM parcelas p
         JOIN compras c ON p.compra_id = c.id
-        WHERE p.vencimento = ? AND (lower(c.fonte_origem) LIKE '%nubank%' OR lower(c.estabelecimento) IN ('litevivoeasyanual', 'shogun'))
+        WHERE p.vencimento = ? AND c.cancelada = 0 AND p.status != 'cancelada'
+          AND (lower(c.fonte_origem) LIKE '%nubank%' OR lower(c.estabelecimento) IN ('litevivoeasyanual', 'shogun'))
           AND c.id NOT IN (SELECT compra_id FROM parcelas WHERE n=1 AND vencimento = ?)
       `).get(vencAnoMes, vencAnoMes).tot;
 
@@ -63,13 +64,15 @@ function obterFaturasAbertas(dataReferencia = null) {
       `).get(dataCorteAnt, dataCorteFim).tot;
 
     } else if (c.instituicao === 'mercadopago') {
+      // FIX 30/09/2026: compra cancelada (#251, ML 15x246,20 estornada) estava somando 246,20
+      // na fatura de out — agora filtra cancelada em compra E parcela (c.cancelada=0, p.status!='cancelada')
       parcAgendadas = db.prepare(`
         SELECT COALESCE(SUM(c.valor_parcela), 0) as tot
         FROM parcelas p
         JOIN compras c ON p.compra_id = c.id
-        WHERE p.vencimento = ? AND (lower(c.fonte_origem) LIKE '%mercado%' OR lower(c.estabelecimento) LIKE '%mercado%')
+        WHERE p.vencimento = ? AND c.cancelada = 0 AND p.status != 'cancelada'
+          AND (lower(c.fonte_origem) LIKE '%mercado%' OR lower(c.estabelecimento) LIKE '%mercado%')
           AND c.id NOT IN (SELECT compra_id FROM parcelas WHERE n=1 AND vencimento = ?)
-          AND c.id != 246
       `).get(vencAnoMes, vencAnoMes).tot;
 
       const dataCorteAntMP = `${anoAnt}-${String(mesAnt).padStart(2, '0')}-29`;
@@ -84,6 +87,7 @@ function obterFaturasAbertas(dataReferencia = null) {
           )
           AND data <= ?
           AND natureza = 'gasto'
+          AND natureza != 'ignorado'
           AND (parcela IS NULL OR parcela LIKE '1/%')
       `).get(dataCorteAntMP, dataCorteAntMP, dataCorteFimMP).tot;
 
@@ -92,7 +96,8 @@ function obterFaturasAbertas(dataReferencia = null) {
         SELECT COALESCE(SUM(c.valor_parcela), 0) as tot
         FROM parcelas p
         JOIN compras c ON p.compra_id = c.id
-        WHERE p.vencimento = ? AND (lower(c.fonte_origem) LIKE '%itau%' OR lower(c.estabelecimento) LIKE '%foton%')
+        WHERE p.vencimento = ? AND c.cancelada = 0 AND p.status != 'cancelada'
+          AND (lower(c.fonte_origem) LIKE '%itau%' OR lower(c.estabelecimento) LIKE '%foton%')
           AND c.id NOT IN (SELECT compra_id FROM parcelas WHERE n=1 AND vencimento = ?)
       `).get(vencAnoMes, vencAnoMes).tot;
 
@@ -102,6 +107,7 @@ function obterFaturasAbertas(dataReferencia = null) {
         WHERE (lower(conta) LIKE '%signature%' OR (fonte = 'itau-fatura' AND importacao_id IS NULL))
           AND data >= ? AND data <= ?
           AND natureza = 'gasto'
+          AND natureza != 'ignorado'
           AND (parcela IS NULL OR parcela LIKE '1/%')
       `).get(dataCorteAnt, dataCorteFim).tot;
 
@@ -116,7 +122,8 @@ function obterFaturasAbertas(dataReferencia = null) {
         SELECT COALESCE(SUM(c.valor_parcela), 0) as tot
         FROM parcelas p
         JOIN compras c ON p.compra_id = c.id
-        WHERE p.vencimento = ? AND (lower(c.fonte_origem) LIKE ? OR lower(c.estabelecimento) LIKE ?)
+        WHERE p.vencimento = ? AND c.cancelada = 0 AND p.status != 'cancelada'
+          AND (lower(c.fonte_origem) LIKE ? OR lower(c.estabelecimento) LIKE ?)
           AND c.id NOT IN (SELECT compra_id FROM parcelas WHERE n=1 AND vencimento = ?)
       `).get(vencAnoMes, `%${termoBusca}%`, `%${termoBusca}%`, vencAnoMes).tot;
 
@@ -127,6 +134,7 @@ function obterFaturasAbertas(dataReferencia = null) {
           WHERE (lower(conta) = ? OR lower(fonte) LIKE ?)
             AND data >= ? AND data <= ?
             AND natureza = 'gasto'
+            AND natureza != 'ignorado'
             AND (parcela IS NULL OR parcela LIKE '1/%')
         `).get((c.conta_auvp || '').toLowerCase(), `%${termoBusca}%`, dataCorteAnt, dataCorteFim).tot;
       }
