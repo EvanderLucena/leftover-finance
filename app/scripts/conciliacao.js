@@ -166,6 +166,14 @@ function confirmar({ lancamento_id, transacao_id, recusar }) {
 
   const t = transacao_id ? db.prepare('SELECT * FROM transacoes WHERE id=?').get(transacao_id) : null;
 
+  // transação já anexada a outro lançamento? bloqueia (conta duplicada / re-anexo indevido)
+  if (t) {
+    const outro = db.prepare('SELECT id, descricao FROM lancamentos WHERE transacao_id=? AND id != ?').get(t.id, l.id);
+    if (outro) {
+      return { erro: `Essa transação já pagou "${outro.descricao}" (lançamento #${outro.id}). Confira se não é conta duplicada.`, ja_vinculada: { lancamento_id: outro.id, descricao: outro.descricao } };
+    }
+  }
+
   // aprende: associação padrão-transação → descrição lançamento
   if (t) {
     const padrao = padraoDe(t.descricao);
@@ -242,6 +250,12 @@ function autoConciliarMes(mesRef) {
       .map(r => r.transacao_id)
       .filter(id => !!db.prepare('SELECT id FROM transacoes WHERE id=?').get(id))
   );
+  // transações que já PAGARAM uma conta: nunca re-conciliar em outra conta
+  for (const id of usadosTx) {
+    const pago = db.prepare('SELECT COUNT(*) n FROM lancamentos WHERE transacao_id=? AND pago=1').get(id).n;
+    if (pago > 0) continue;
+    usadosTx.delete(id); // vínculo órfão (conta excluída?) — pode reusar
+  }
 
   const detalhes = [];
 

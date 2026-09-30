@@ -226,6 +226,14 @@ catch (e) { /* já existe */ }
 // migração aditiva: padrao_busca em recorrencias
 try { db.exec('ALTER TABLE recorrencias ADD COLUMN padrao_busca TEXT'); }
 catch (e) { /* já existe */ }
+// migração aditiva: cancelamento de compra (estorno/cancelamento do merchant)
+// cancelada=0 normal; 1 = compra cancelada — parcelas saem da projeção, evidências viram tombstone
+try { db.exec('ALTER TABLE compras ADD COLUMN cancelada INTEGER NOT NULL DEFAULT 0'); }
+catch (e) { /* já existe */ }
+try { db.exec('ALTER TABLE compras ADD COLUMN cancelada_em TEXT'); }
+catch (e) { /* já existe */ }
+try { db.exec('ALTER TABLE compras ADD COLUMN motivo_cancelamento TEXT'); }
+catch (e) { /* já existe */ }
 // limpeza de tabelas descontinuadas (assinaturas e tags)
 try { db.exec('DROP TABLE IF EXISTS assinaturas; DROP TABLE IF EXISTS transacao_tags; DROP TABLE IF EXISTS tags;'); }
 catch (e) { /* já limpo */ }

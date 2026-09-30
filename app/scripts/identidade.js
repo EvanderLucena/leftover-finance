@@ -120,7 +120,7 @@ function casarCompra(tx) {
   const venc = normVenc(tx.venc_fatura);
   const candidatas = db.prepare(`
     SELECT * FROM compras
-    WHERE n_parcelas = ? AND ABS(valor_parcela - ?) <= ?`).all(pp.total, valor, tol);
+    WHERE n_parcelas = ? AND ABS(valor_parcela - ?) <= ? AND cancelada = 0`).all(pp.total, valor, tol);
   for (const c of candidatas) {
     // contém bidirecional: AUVP trunca/abrevia diferente do PDF
     const ce = String(c.estabelecimento || '');
@@ -149,7 +149,10 @@ function criarCompra(tx) {
   if (!pp) return null;
   const est = normEst(tx.descricao) || 'sem-estabelecimento';
   const valor = Math.round(Math.abs(tx.valor) * 100) / 100;
-  const venc = normVenc(tx.venc_fatura);
+  let venc = normVenc(tx.venc_fatura);
+  if (!venc && tx.data) {
+    venc = normVenc(tx.data.slice(0, 7));
+  }
   const r = db.prepare(`INSERT INTO compras (estabelecimento, valor_parcela, n_parcelas, mes_inicio, fonte_origem)
     VALUES (?, ?, ?, ?, ?)`).run(est, valor, pp.total, venc, tx.fonte || null);
   const compraId = Number(r.lastInsertRowid);
@@ -185,7 +188,10 @@ function statusPorVenc(venc) {
 function vincularTransacao(tx) {
   const pp = parseParcela(tx.parcela);
   if (!pp) return null;
-  const venc = normVenc(tx.venc_fatura);
+  let venc = normVenc(tx.venc_fatura);
+  if (!venc && tx.data) {
+    venc = normVenc(tx.data.slice(0, 7));
+  }
   const status = statusPorVenc(venc);
 
   // 1. parcela existente (mesmo N + valor exato + venc batendo)
@@ -214,6 +220,17 @@ function vincularTransacao(tx) {
       const atual = db.prepare('SELECT vencimento, status FROM parcelas WHERE id=?').get(p.id);
       if (atual.status === 'agendada' || !atual.vencimento) {
         db.prepare('UPDATE parcelas SET vencimento=?, status=? WHERE id=?').run(venc, status, p.id);
+      }
+    }
+    if (venc && !compra.mes_inicio) {
+      const [y, m] = venc.split('-').map(Number);
+      const fmtMes = num => `${Math.floor((num - 1) / 12)}-${String(((num - 1) % 12) + 1).padStart(2, '0')}`;
+      const inicio = fmtMes(y * 12 + m - (pp.n - 1));
+      db.prepare('UPDATE compras SET mes_inicio=? WHERE id=?').run(inicio, compra.id);
+      const semVenc = db.prepare('SELECT id, n FROM parcelas WHERE compra_id=? AND vencimento IS NULL').all(compra.id);
+      for (const sv of semVenc) {
+        const vEst = fmtMes(y * 12 + m + (sv.n - pp.n));
+        db.prepare('UPDATE parcelas SET vencimento=? WHERE id=?').run(vEst, sv.id);
       }
     }
     return { compra_id: compra.id, parcela_id: p.id, criada: r.changes > 0 };

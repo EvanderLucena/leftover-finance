@@ -1192,6 +1192,12 @@ app.get('/api/projecao', (req, res) => {
   }
 
   // V2: comprometido + sobra livre (série do PRÓXIMO mês em diante) — exatamente 12 meses futuros
+  // DECISÃO 28/09/2026 (Evander): a série considera SÓ o que está REALMENTE comprometido —
+  //   1º mês = faturas abertas reais; meses seguintes = fixos + parcelas contratadas + parcelados.
+  //   Médias móveis (cartão à vista / PIX variável) NÃO entram na série: jogar média como
+  //   previsão de compromisso futuro mostrou ser enganoso (a média de itau-conta arrasta
+  //   IPTU anual, boletos de terreno, GCI e PIXs pontuais que não são compromisso mensal).
+  //   As camadas 3+4 continuam calculadas e exibidas como referência, fora da soma.
   const mesAtualRef = `${String(aM).padStart(2, '0')}-${aY}`;
   const parcelasExternasMensal = compromissos.filter(c => c.origem === 'parcelado-fixos')
     .reduce((s, c) => s + c.valor, 0);
@@ -1208,7 +1214,9 @@ app.get('/api/projecao', (req, res) => {
     const mesIso = `${sy}-${String(sm).padStart(2, '0')}`;
     return {
       mes: s.mes, mes_iso: mesIso, fixos: fixosMes, parcelas_cartao: parcelasCartao,
-      parcelas_externas: parcelasExternas, comprometido, renda: rendaMes,
+      parcelas_externas: parcelasExternas,
+      cartao_avista: gastoCartaoAvista, pix_variavel: gastoPixVariavel,
+      comprometido, renda: rendaMes,
       sobra_livre: rendaMes - comprometido, gasto_real: null, total: s.total,
       pct_comprometido: Math.round((comprometido / rendaMes) * 100)
     };
@@ -1485,8 +1493,9 @@ app.get('/api/contas-mes-reconciliar', (req, res) => {
     WHERE l.mes_id=? AND l.pago=0 ORDER BY l.vencimento`).all(mes.id);
   const txs = db.prepare(`
     SELECT * FROM transacoes
-    WHERE natureza='gasto' AND valor < 0 AND data >= date('now', '-40 days')
+    WHERE natureza='gasto' AND valor < 0 AND data >= date('now', '-40 days') AND data <= date('now')
     AND id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas)
+    AND id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)
     ORDER BY data DESC`).all();
   const contas = [];
   const usadas = new Set();
@@ -1515,9 +1524,10 @@ app.get('/api/lancamentos/:id/candidatos', (req, res) => {
   const busca = (req.query.busca || '').toLowerCase();
   let sql = `SELECT id, data, descricao, valor, fonte FROM transacoes
     WHERE valor < 0 AND (natureza IN ('gasto', 'transferencia') OR natureza IS NULL)
-      AND data >= date(?, '-35 days') AND data <= date(?, '+35 days')
-      AND id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas WHERE transacao_id IS NOT NULL)`;
-  const params = [l.vencimento, l.vencimento];
+      AND data >= date(?, '-35 days') AND data <= date(?, '+35 days') AND data <= date('now')
+      AND id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas WHERE transacao_id IS NOT NULL)
+      AND id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL AND id != ?)`;
+  const params = [l.vencimento, l.vencimento, l.id];
   if (busca) {
     sql += ' AND (descricao LIKE ? OR observacao LIKE ?)';
     params.push('%' + busca + '%', '%' + busca + '%');
@@ -1532,6 +1542,16 @@ app.post('/api/contas-mes-reconciliar/anexar', (req, res) => {
   if (!l) return res.status(404).json({ erro: 'lançamento não encontrado' });
   const t = db.prepare('SELECT * FROM transacoes WHERE id=?').get(transacao_id);
   if (!t) return res.status(404).json({ erro: 'transação não encontrada' });
+  // transação já anexada a OUTRO lançamento pago? (ex: conta recriada manualmente
+  // depois de conciliar — não deve roubar o vínculo nem pagar a duplicata)
+  const outro = db.prepare('SELECT id, descricao, pago FROM lancamentos WHERE transacao_id=? AND id != ?').get(t.id, l.id);
+  if (outro) {
+    return res.status(409).json({
+      erro: `Essa transação já pagou "${outro.descricao}" (lançamento #${outro.id}).` +
+        (outro.pago ? ' Confira se não é conta duplicada.' : ' Remova o vínculo lá antes.'),
+      ja_vinculada: { lancamento_id: outro.id, descricao: outro.descricao }
+    });
+  }
   const jaPaga = !!l.pago;
   db.prepare('UPDATE lancamentos SET pago=1, pago_em=?, transacao_id=? WHERE id=?').run(t.data, t.id, l.id);
   if (Math.abs(Math.abs(t.valor) - Math.abs(l.valor)) > 0.01) {
@@ -1650,6 +1670,27 @@ app.post('/api/reconciliacao/previa', async (req, res) => {
           const info = mapaSeries.get(t.id);
           parcela = info.parcela;
           vencFat = info.venc_fatura;
+        }
+        if (!vencFat && t.mesReferencia) {
+          vencFat = t.mesReferencia.slice(0, 7);
+        } else if (!vencFat && parcela && t.data) {
+          vencFat = t.data.slice(0, 7);
+        }
+        // RELÓGIO DE FECHAMENTO: se a data da compra é APÓS o fechamento do cartão no mês
+        // da transação, a compra cai na fatura seguinte (venc_fatura = mês + 1).
+        // Ex: Nubank fecha 24/09 → compra de 25/09 cobrará na fatura que vence 01/11.
+        // PDF continua fonte da verdade: quando chegar, o venc real sobrescreve via reconciliação.
+        if (vencFat && t.data) {
+          const cartaoInfo = db.prepare("SELECT dia_fechamento, dia_vencimento FROM contas_bancarias WHERE tipo='CREDIT' AND ativo=1 AND (LOWER(conta_auvp)=LOWER(?) OR LOWER(nome) LIKE LOWER('%' || ? || '%'))").get(t.conta || '', (t.conta || '').replace(' Itaú', '').slice(0, 10));
+          const diaFech = cartaoInfo ? (cartaoInfo.dia_fechamento || 25) : 25;
+          const [aC, mC] = vencFat.split('-').map(Number);
+          const diaCompra = t.data.slice(8, 10) * 1;
+          const mesmoMesCiclo = t.data.slice(0, 7) === vencFat;
+          if (mesmoMesCiclo && diaCompra > diaFech) {
+            const d = new Date(Number(vencFat.slice(0, 4)), Number(vencFat.slice(5, 7)) - 1, 1);
+            d.setMonth(d.getMonth() + 1);
+            vencFat = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          }
         }
         loteNeg.push({
           data: (t.data || '').slice(0, 10),
@@ -1840,30 +1881,57 @@ app.get('/api/compras', (req, res) => {
   const { busca, status } = req.query;
   let sql = `
     SELECT c.id, c.estabelecimento, c.valor_parcela, c.n_parcelas, c.mes_inicio, c.fonte_origem,
+      c.cancelada, c.cancelada_em, c.motivo_cancelamento,
       (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id AND p.status='cobrada') cobradas,
       (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id AND p.status='agendada') agendadas,
       (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id) total_parcelas_criadas,
       (SELECT COUNT(*) FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=c.id)) evidencias,
-      (SELECT COUNT(*) FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=c.id)) evidências,
+      (SELECT t.descricao FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=c.id) ORDER BY t.id DESC LIMIT 1) descricao_original,
       EXISTS (
         SELECT 1 FROM compras c2
-        WHERE c2.id != c.id
+        WHERE c2.id != c.id AND c2.cancelada = 0
           AND c2.estabelecimento = c.estabelecimento
           AND ABS(c2.valor_parcela - c.valor_parcela) <= 1.00
       ) tem_paralela
-    FROM compras c WHERE 1=1`;
+    FROM compras c WHERE c.cancelada = 0`;
   const params = [];
-  if (busca) { sql += ' AND c.estabelecimento LIKE ?'; params.push('%' + busca + '%'); }
+  if (busca) {
+    const buscaNorm = busca.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    sql += ` AND (
+      c.estabelecimento LIKE ? 
+      OR c.estabelecimento LIKE ?
+      OR EXISTS (
+        SELECT 1 FROM parcelas p 
+        JOIN transacoes t ON t.parcela_id=p.id 
+        WHERE p.compra_id=c.id AND (t.descricao LIKE ? OR t.descricao LIKE ?)
+      )
+    )`;
+    params.push('%' + busca + '%', '%' + buscaNorm + '%', '%' + busca + '%', '%' + buscaNorm + '%');
+  }
   if (status === 'paralelas') {
     sql += ` AND EXISTS (
       SELECT 1 FROM compras c2
-      WHERE c2.id != c.id
+      WHERE c2.id != c.id AND c2.cancelada = 0
         AND c2.estabelecimento = c.estabelecimento
         AND ABS(c2.valor_parcela - c.valor_parcela) <= 1.00
     )`;
+  } else if (status === 'canceladas') {
+    sql = sql.replace('WHERE c.cancelada = 0', 'WHERE c.cancelada = 1');
   }
   sql += ' ORDER BY c.mes_inicio DESC, c.estabelecimento';
   res.json(db.prepare(sql).all(...params));
+});
+
+// Compras canceladas (histórico/auditoria)
+app.get('/api/compras-canceladas', (req, res) => {
+  const rows = db.prepare(`
+    SELECT c.id, c.estabelecimento, c.valor_parcela, c.n_parcelas, c.mes_inicio, c.fonte_origem,
+      c.cancelada_em, c.motivo_cancelamento,
+      (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id AND p.status='cancelada') parcelas_canceladas,
+      (SELECT COUNT(*) FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=c.id) AND t.natureza='ignorado') transacoes_ignoradas
+    FROM compras c WHERE c.cancelada = 1
+    ORDER BY c.cancelada_em DESC`).all();
+  res.json(rows);
 });
 
 app.get('/api/compras/:id', (req, res) => {
@@ -1875,6 +1943,84 @@ app.get('/api/compras/:id', (req, res) => {
     FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=?)
     ORDER BY t.data`).all(c.id);
   res.json({ ...c, parcelas, transacoes });
+});
+
+// Cancelar compra (estorno/cancelamento do merchant — ex: compra cancelada no Mercado Livre)
+// - parcelas marcadas 'cancelada' (saem da projeção/calendário)
+// - evidências (transações) viram tombstone: natureza='ignorado' — MANTÉM hash_unico,
+//   senão a AUVP reenviaria a mesma transação e ela voltaria como "nova" no próximo sync
+// - grava motivo e data do cancelamento
+app.post('/api/compras/:id/cancelar', (req, res) => {
+  const c = db.prepare('SELECT * FROM compras WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ erro: 'compra não encontrada' });
+  if (c.cancelada) return res.status(400).json({ erro: 'compra já está cancelada' });
+  const motivo = (req.body && req.body.motivo) || 'Compra cancelada / estornada pelo estabelecimento';
+
+  const txs = db.prepare(`
+    SELECT id, natureza FROM transacoes
+    WHERE parcela_id IN (SELECT id FROM parcelas WHERE compra_id=?)`).all(c.id);
+
+  const cancelarTx = db.prepare("UPDATE transacoes SET natureza='ignorado' WHERE id=?");
+  const cancelarParcelas = db.prepare("UPDATE parcelas SET status='cancelada' WHERE compra_id=?");
+  const cancelarCompra = db.prepare("UPDATE compras SET cancelada=1, cancelada_em=datetime('now'), motivo_cancelamento=? WHERE id=?");
+
+  const run = () => {
+    db.exec('BEGIN');
+    try {
+      for (const t of txs) {
+        if (t.natureza === 'gasto') cancelarTx.run(t.id);
+      }
+      cancelarParcelas.run(c.id);
+      cancelarCompra.run(motivo, c.id);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  };
+  run();
+
+  res.json({
+    ok: true,
+    compra_id: c.id,
+    parcelas_canceladas: db.prepare('SELECT COUNT(*) n FROM parcelas WHERE compra_id=? AND status=\'cancelada\'').get(c.id).n,
+    transacoes_ignoradas: txs.filter(t => t.natureza === 'gasto').length
+  });
+});
+
+// Reverter cancelamento (caso o estorno não se confirme)
+app.post('/api/compras/:id/reverter-cancelamento', (req, res) => {
+  const c = db.prepare('SELECT * FROM compras WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ erro: 'compra não encontrada' });
+  if (!c.cancelada) return res.status(400).json({ erro: 'compra não está cancelada' });
+
+  const reverterTx = db.prepare("UPDATE transacoes SET natureza='gasto' WHERE parcela_id IN (SELECT id FROM parcelas WHERE compra_id=?) AND natureza='ignorado'");
+  const reverterParcelas = db.prepare(`
+    UPDATE parcelas SET status = CASE
+      WHEN vencimento IS NOT NULL AND substr(vencimento,1,7) <= substr(date('now'),1,7) THEN 'cobrada'
+      ELSE 'agendada' END
+    WHERE compra_id=? AND status='cancelada'`);
+  const reverterCompra = db.prepare('UPDATE compras SET cancelada=0, cancelada_em=NULL, motivo_cancelamento=NULL WHERE id=?');
+
+  const run = () => {
+    db.exec('BEGIN');
+    try {
+      reverterTx.run(c.id);
+      reverterParcelas.run(c.id);
+      reverterCompra.run(c.id);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  };
+  run();
+
+  res.json({
+    ok: true,
+    compra_id: c.id,
+    parcelas_revertidas: db.prepare("SELECT COUNT(*) n FROM parcelas WHERE compra_id=? AND status!='cancelada'").get(c.id).n
+  });
 });
 
 // ---------- API: saída mensal (gráfico da visão) ----------

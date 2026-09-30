@@ -1366,12 +1366,15 @@ async function loadProjecao() {
   if (inParc) inParc.onchange = () => { if (inVal?.value) executarSimulacao(); };
   if (simInicioSel) simInicioSel.onchange = () => { if (inVal?.value) executarSimulacao(); };
 
-  // camadas explicadas
+  // camadas explicadas — DECISÃO 28/09/2026: série considera SÓ comprometido real;
+  // médias móveis são exibidas como referência, fora da soma (não são compromisso mensal)
   document.getElementById('proj-camadas').innerHTML = `
     <div class="camadas-row"><span class="dot" style="background:#4dabff"></span><b>Fixos</b> ${fmt(p.fixos_mensais)}<span class="muted">— contas recorrentes mensais (aluguel, internet, saúde...)</span></div>
     <div class="camadas-row"><span class="dot" style="background:#ff4d5e"></span><b>Cartões de crédito</b> <span class="muted">— faturas abertas reais no 1º mês (${mesCurto(m1.mes)}: ${fmt(m1.parcelas_cartao)}) e parcelas contratuais nos meses seguintes</span></div>
     <div class="camadas-row"><span class="dot" style="background:#f28b5b"></span><b>Parcelas externas</b> ${fmt(p.parcelas_externas_mensal)}<span class="muted">— parcelamentos avulsos fora do cartão (Airbnb, IPTU Mãe, Leão IRPF...)</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#00d68f"></span><b>Sobra livre</b> ${fmt(m1.sobra_livre)}<span class="muted">— valor livre mensal disponível para reservas e gastos do dia a dia</span></div>`;
+    <div class="camadas-row" style="opacity:.55;"><span class="dot" style="background:#ffa500"></span><b>Cartão à vista (ref. média 4m)</b> ${fmt(p.gasto_cartao_avista)}<span class="muted">— apenas referência; não é compromisso, não soma na sobra</span></div>
+    <div class="camadas-row" style="opacity:.55;"><span class="dot" style="background:#9d7aff"></span><b>PIX/débito variável (ref. média 4m)</b> ${fmt(p.gasto_pix_variavel)}<span class="muted">— apenas referência; gasto real do dia a dia fica na Sobra livre</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#00d68f"></span><b>Sobra livre</b> ${fmt(m1.sobra_livre)}<span class="muted">— renda − comprometido real; os gastos do dia a dia saem daqui</span></div>`;
 
   const _ticker = document.getElementById('proj-ticker');
   if (_ticker) _ticker.innerHTML = '';
@@ -1924,8 +1927,9 @@ async function loadCompras() {
     const pct = c.n_parcelas ? Math.round(c.cobradas / c.n_parcelas * 100) : 0;
     const paralela = !!c.tem_paralela;
     const evs = c.evidencias ?? c['evidências'] ?? 0;
+    const nomeExib = c.descricao_original || c.estabelecimento;
     return `<tr style="cursor:pointer" ondblclick="abrirCompra(${c.id})" title="duplo-clique pra ver detalhes">
-      <td>${c.estabelecimento}${paralela ? ' <span class="badge" style="font-size:10px; background:rgba(255,193,7,0.15); color:#d97706; border:1px solid rgba(255,193,7,0.3);" title="Existe outra compra no mesmo estabelecimento com valor similar">paralela</span>' : ''}</td>
+      <td><b>${nomeExib}</b>${c.descricao_original && c.descricao_original !== c.estabelecimento ? ` <span class="muted" style="font-size:11px; font-weight:normal;">(${c.estabelecimento})</span>` : ''}${paralela ? ' <span class="badge" style="font-size:10px; background:rgba(255,193,7,0.15); color:#d97706; border:1px solid rgba(255,193,7,0.3);" title="Existe outra compra no mesmo estabelecimento com valor similar">paralela</span>' : ''}</td>
       <td class="mono">${fmt(c.valor_parcela)}</td>
       <td class="muted">${c.cobradas}/${c.n_parcelas}${c.agendadas ? ` <span class="muted" style="font-size:11px;">(+${c.agendadas} agend.)</span>` : ''}</td>
       <td class="muted">${c.mes_inicio || '—'}</td>
@@ -1943,17 +1947,43 @@ window.abrirCompra = async function (id) {
   const evs = c.evidencias ?? c['evidências'] ?? (c.transacoes ? c.transacoes.length : 0);
   const parcelas = c.parcelas.map(p => {
     const txs = (c.transacoes || []).filter(t => t.parcela_id === p.id);
-    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px;">
+    const statusLbl = p.status === 'cancelada' ? '<span class="muted" style="text-decoration:line-through; width:75px; text-transform:uppercase; font-size:11px; font-weight:600;">cancelada</span>' : `<span class="${p.status === 'cobrada' ? 'up' : 'muted'}" style="width:75px; text-transform:uppercase; font-size:11px; font-weight:600;">${p.status}</span>`;
+    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; ${p.status === 'cancelada' ? 'opacity:.55;' : ''}">
       <span class="mono" style="width:45px;">${p.n}/${c.n_parcelas}</span>
       <span class="mono" style="width:80px;">${p.vencimento || '—'}</span>
-      <span class="${p.status === 'cobrada' ? 'up' : 'muted'}" style="width:75px; text-transform:uppercase; font-size:11px; font-weight:600;">${p.status}</span>
+      ${statusLbl}
       <span class="muted" style="font-size:11.5px; flex:1; text-align:right;">${txs.map(t => `${(t.fonte || '').replace('itau-fatura', 'Itaú').replace('nubank', 'Nubank').replace('mercadopago', 'MP').replace('auvp-mcp', 'AUVP')} (${t.data.slice(5)})`).join(' · ') || '<span style="opacity:0.5">sem transação direta</span>'}</span>
     </div>`;
   }).join('');
+  const btnCancelar = c.cancelada
+    ? `<button type="button" class="ghost" onclick="reverterCancelamentoCompra(${c.id})" style="color:var(--green);">↩ Reverter cancelamento</button>`
+    : `<button type="button" class="ghost" onclick="cancelarCompra(${c.id})" style="color:#e5484d;">✕ Cancelar compra (estorno)</button>`;
   document.getElementById('comp-dlg-corpo').innerHTML = `
-    <div class="muted" style="margin-bottom:14px; font-size:12.5px;">Início: <b>${c.mes_inicio || '—'}</b> · Fonte original: <b>${c.fonte_origem || '—'}</b> · <b>${evs}</b> evidências vinculadas</div>
-    <div style="max-height:380px; overflow-y:auto;">${parcelas}</div>`;
+    <div class="muted" style="margin-bottom:14px; font-size:12.5px;">Início: <b>${c.mes_inicio || '—'}</b> · Fonte original: <b>${c.fonte_origem || '—'}</b> · <b>${evs}</b> evidências vinculadas${c.cancelada ? ` · <b style="color:#e5484d;">CANCELADA em ${(c.cancelada_em || '').slice(0, 10)}</b>${c.motivo_cancelamento ? ' — ' + c.motivo_cancelamento : ''}` : ''}</div>
+    <div style="max-height:380px; overflow-y:auto;">${parcelas}</div>
+    <div style="margin-top:12px;">${btnCancelar}</div>`;
   document.getElementById('dlg-compra').showModal();
+};
+
+window.cancelarCompra = async function (id) {
+  const motivo = prompt('Motivo do cancelamento (ex: estorno Mercado Livre, compra cancelada):', 'Compra cancelada / estornada');
+  if (motivo === null) return;
+  const r = await api('/api/compras/' + id + '/cancelar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motivo }) }).catch(e => ({ erro: e.message }));
+  if (r.erro) { toast('Erro: ' + r.erro); return; }
+  toast(`Compra cancelada: ${r.parcelas_canceladas} parcelas fora da projeção, ${r.transacoes_ignoradas} evidência(s) arquivada(s)`);
+  document.getElementById('dlg-compra').close();
+  loadCompras();
+  await api('/api/projecao?recalcular=1').catch(() => {});
+};
+
+window.reverterCancelamentoCompra = async function (id) {
+  if (!confirm('Reverter cancelamento? As parcelas voltam pra projeção e as evidências reativam.')) return;
+  const r = await api('/api/compras/' + id + '/reverter-cancelamento', { method: 'POST' }).catch(e => ({ erro: e.message }));
+  if (r.erro) { toast('Erro: ' + r.erro); return; }
+  toast('Cancelamento revertido');
+  document.getElementById('dlg-compra').close();
+  loadCompras();
+  await api('/api/projecao?recalcular=1').catch(() => {});
 };
 document.getElementById('comp-busca').oninput = e => { clearTimeout(window._compT); window._compT = setTimeout(loadCompras, 300); };
 document.getElementById('comp-status').onchange = loadCompras;
@@ -2457,9 +2487,11 @@ function renderReconciliacao() {
               <div class="r2">
                 <span class="dt">${e.data}</span>
                 <span class="fbadge f-bank">${e.natureza}</span>
-                <button class="ghost" style="padding:3px 8px; font-size:11px; margin-left:auto; border:1px solid var(--border); border-radius:6px; color:var(--muted);" onclick="event.stopPropagation(); recMoverParaOcultar('entradas', ${i})" title="Ocultar transação: salva no banco como neutra, não afeta totais e nunca mais reaparece">👁️ Ocultar</button>
-              </div>
-            </div>`).join('')}
+                <span style="margin-left:auto; display:flex; gap:6px;">
+                  <button class="ghost" style="padding:3px 8px; font-size:11px; border:1px solid var(--border); border-radius:6px; color:var(--muted);" onclick="event.stopPropagation(); recEntradaEntreContas(${i})" title="É dinheiro se movendo entre suas contas (ex: resgate de aplicação pra cobrir PIX) — marca como transferência própria, sem contar como renda">↔ Entre contas</button>
+                  <button class="ghost" style="padding:3px 8px; font-size:11px; border:1px solid var(--border); border-radius:6px; color:var(--muted);" onclick="event.stopPropagation(); recMoverParaOcultar('entradas', ${i})" title="Ocultar transação: salva no banco como neutra, não afeta totais e nunca mais reaparece">👁️ Ocultar</button>
+                </span>
+              </div>`).join('')}
         </div>`;
     }
   } else if (recAbaAtiva === 'fracos') {
@@ -2509,6 +2541,22 @@ window.recMoverParaOcultar = function (tipo, i) {
   renderReconciliacao();
 };
 window.recMoverParaIgnorado = window.recMoverParaOcultar;
+
+// Entrada é transferência entre contas próprias (ex: resgate de aplicação cobrindo PIX)
+window.recEntradaEntreContas = function (i) {
+  const e = (recPrevia.entradas || [])[i];
+  if (!e) return;
+  e.natureza = 'transferencia-propria';
+  e.tipo = 'entre-contas';
+  e.motivo = 'Transferência entre contas próprias (marcado pelo usuário)';
+  e.ignorado_calculo = true;
+  e._sel = true;
+  recPrevia.entradas.splice(i, 1);
+  recPrevia.neutros = recPrevia.neutros || [];
+  recPrevia.neutros.unshift(e);
+  toast('Marcada como transferência entre contas próprias: não conta como renda.');
+  renderReconciliacao();
+};
 
 window.recMoverDeVolta = function (i) {
   const n = (recPrevia.neutros || [])[i];
@@ -2670,6 +2718,8 @@ async function aplicarReconciliacao() {
     ...escolhidos.map(t => ({
       acao: 'inserir', data: t.data, valor: t.valor, descricao: t.descricao, natureza: t.natureza || 'gasto', categoria: t.categoria, parcela: t.parcela, fonte: t.fonte, hash_externo: t.hash_externo,
       conta: t.conta,
+      venc_fatura: t.venc_fatura || null,
+      observacao: t.observacao || null,
       marcar_paga: !!(t._marcarPaga && (t._lancamentoManual || t.conta_do_mes?.lancamento_id)),
       lancamento_id: t._lancamentoManual || t.conta_do_mes?.lancamento_id
     })),

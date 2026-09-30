@@ -130,7 +130,7 @@ function compromissosFuturos() {
 
   const compras = db.prepare(`
     SELECT c.id, c.estabelecimento, c.valor_parcela, c.n_parcelas, c.fonte_origem
-    FROM compras c`).all();
+    FROM compras c WHERE c.cancelada = 0`).all();
   for (const c of compras) {
     const parcelas = db.prepare('SELECT n, vencimento, status FROM parcelas WHERE compra_id=? ORDER BY n').all(c.id);
     // última parcela com vencimento conhecido (âncora para estimar as sem venc)
@@ -143,6 +143,7 @@ function compromissosFuturos() {
     }
 
     for (const p of parcelas) {
+      if (p.status === 'cancelada') continue;
       let vNum = null;
       if (p.vencimento) {
         const [vy, vm] = p.vencimento.split('-').map(Number);
@@ -187,7 +188,7 @@ function calendarioDividas() {
   // parcelas de cartão — NOVO MODELO (fase 1): compras/parcelas
   const compras = db.prepare(`
     SELECT c.id, c.estabelecimento, c.valor_parcela, c.n_parcelas, c.fonte_origem
-    FROM compras c`).all();
+    FROM compras c WHERE c.cancelada = 0`).all();
   for (const c of compras) {
     const parcelas = db.prepare('SELECT n, vencimento, status FROM parcelas WHERE compra_id=? ORDER BY n').all(c.id);
     const comVenc = parcelas.filter(p => p.vencimento);
@@ -201,6 +202,7 @@ function calendarioDividas() {
     }
     // vencimento estimado de cada parcela (real ou sequência a partir da âncora)
     const vencDe = p => {
+      if (p.status === 'cancelada') return null;
       if (p.vencimento) {
         const [vy, vm] = p.vencimento.split('-').map(Number);
         return vy * 12 + vm;
