@@ -1022,6 +1022,7 @@ app.get('/api/projecao/detalhe/:mes', (req, res) => {
   }
 
   // 2. Parcelas de Cartão / Faturas Abertas
+  const { obterFaturasAbertas } = require('./scripts/faturas-abertas');
   const faturasAbertas = obterFaturasAbertas(req.query.data_ref || null);
   let cartaoMes = [];
   if (mesRef === faturasAbertas.mes_referencia && faturasAbertas.total > 0) {
@@ -1038,21 +1039,39 @@ app.get('/api/projecao/detalhe/:mes', (req, res) => {
       tipo_fatura: 'aberta'
     }));
   } else {
-    const { compromissosFuturos } = require('./scripts/parcelas-futuras');
-    const cf = compromissosFuturos();
-    cartaoMes = cf.filter(x => {
-      const [m, y] = x.mes.split('-');
-      return `${y}-${m}` === mesIso;
-    }).sort((a, b) => b.valor - a.valor).map(x => ({
-      descricao: x.descricao,
-      valor: x.valor,
-      fonte: x.fonte || 'cartao'
-    }));
+    // Verifica se há faturas de cartão já lançadas no mês (ex: mês corrente)
+    const cartoesLanc = db.prepare(`
+      SELECT l.descricao, l.valor, l.vencimento
+      FROM lancamentos l
+      JOIN meses m ON l.mes_id = m.id
+      WHERE m.ref = ? AND (l.origem = 'fatura-aberta' OR l.categoria_id = (SELECT id FROM categorias WHERE nome = 'Cartões'))
+    `).all(mesRef);
+    if (cartoesLanc.length > 0) {
+      cartaoMes = cartoesLanc.map(c => ({
+        descricao: c.descricao,
+        valor: c.valor,
+        fonte: 'cartao',
+        vencimento: c.vencimento,
+        tipo_fatura: 'fechada'
+      }));
+    } else {
+      const { compromissosFuturos } = require('./scripts/parcelas-futuras');
+      const cf = compromissosFuturos();
+      cartaoMes = cf.filter(x => {
+        const [m, y] = x.mes.split('-');
+        return `${y}-${m}` === mesIso;
+      }).sort((a, b) => b.valor - a.valor).map(x => ({
+        descricao: x.descricao,
+        valor: x.valor,
+        fonte: x.fonte || 'cartao'
+      }));
+    }
   }
 
   // 3. Parcelas Externas
   const hoje = new Date().toISOString().slice(0, 10);
   const [aY, aM] = hoje.split('-').map(Number);
+  const mesAtualRef = `${String(aM).padStart(2, '0')}-${aY}`;
   const parceladosRec = db.prepare(`
     SELECT r.id, r.descricao, r.valor, r.total_parcelas, r.parcela_atual, c.nome categoria, r.dia_venc
     FROM recorrencias r
@@ -1061,19 +1080,31 @@ app.get('/api/projecao/detalhe/:mes', (req, res) => {
   `).all();
   const externasMes = [];
   for (const p of parceladosRec) {
-    const restam = p.total_parcelas - (p.parcela_atual || 0);
-    for (let i = 1; i <= restam; i++) {
-      const mi = (aM - 1) + i;
-      const mStr = `${String(mi % 12 + 1).padStart(2, '0')}-${aY + Math.floor(mi / 12)}`;
-      if (mStr === mesRef) {
-        externasMes.push({
-          id: p.id,
-          descricao: p.descricao,
-          parcela: `${(p.parcela_atual || 0) + i}/${p.total_parcelas}`,
-          valor: p.valor,
-          categoria: p.categoria || 'Parcelado',
-          dia_venc: p.dia_venc || 10
-        });
+    const atual = p.parcela_atual || 1;
+    if (mesRef === mesAtualRef && atual <= p.total_parcelas) {
+      externasMes.push({
+        id: p.id,
+        descricao: p.descricao,
+        parcela: `${atual}/${p.total_parcelas}`,
+        valor: p.valor,
+        categoria: p.categoria || 'Parcelado',
+        dia_venc: p.dia_venc || 10
+      });
+    } else {
+      const restam = p.total_parcelas - atual;
+      for (let i = 1; i <= restam; i++) {
+        const mi = (aM - 1) + i;
+        const mStr = `${String(mi % 12 + 1).padStart(2, '0')}-${aY + Math.floor(mi / 12)}`;
+        if (mStr === mesRef) {
+          externasMes.push({
+            id: p.id,
+            descricao: p.descricao,
+            parcela: `${atual + i}/${p.total_parcelas}`,
+            valor: p.valor,
+            categoria: p.categoria || 'Parcelado',
+            dia_venc: p.dia_venc || 10
+          });
+        }
       }
     }
   }
@@ -1117,16 +1148,33 @@ app.get('/api/projecao', (req, res) => {
   const dataSimulada = req.query.data_ref || null;
   const hoje = dataSimulada || new Date().toISOString().slice(0, 10);
   const [aY, aM] = hoje.split('-').map(Number);
+  const mesAtualRef = `${String(aM).padStart(2, '0')}-${aY}`;
   const compromissos = [];
 
   const parcelados = db.prepare(`SELECT descricao, valor, total_parcelas, parcela_atual
     FROM recorrencias WHERE ativo=1 AND tipo='Parcelado' AND total_parcelas IS NOT NULL`).all();
   for (const p of parcelados) {
-    const restam = p.total_parcelas - (p.parcela_atual || 0);
+    const atual = p.parcela_atual || 1;
+    // Parcela do mês atual (mês 0 = aM)
+    if (atual <= p.total_parcelas) {
+      compromissos.push({
+        descricao: `${p.descricao} (${atual}/${p.total_parcelas})`,
+        mes: mesAtualRef,
+        valor: p.valor,
+        origem: 'parcelado-fixos'
+      });
+    }
+    // Parcelas dos meses seguintes
+    const restam = p.total_parcelas - atual;
     for (let i = 1; i <= restam; i++) {
       const mi = (aM - 1) + i;
       const mes = `${String(mi % 12 + 1).padStart(2, '0')}-${aY + Math.floor(mi / 12)}`;
-      compromissos.push({ descricao: `${p.descricao} (${(p.parcela_atual || 0) + i}/${p.total_parcelas})`, mes, valor: p.valor, origem: 'parcelado-fixos' });
+      compromissos.push({
+        descricao: `${p.descricao} (${atual + i}/${p.total_parcelas})`,
+        mes,
+        valor: p.valor,
+        origem: 'parcelado-fixos'
+      });
     }
   }
 
@@ -1138,7 +1186,7 @@ app.get('/api/projecao', (req, res) => {
   const fixos = db.prepare(`SELECT descricao, valor, periodicidade, data_base FROM recorrencias
     WHERE ativo=1 AND tipo='Recorrente' AND (categoria_id IS NULL OR categoria_id != (SELECT id FROM categorias WHERE nome='Cartões'))`).all();
   const fixosPorMes = {};
-  for (let i = 0; i <= 12; i++) {
+  for (let i = 0; i < 12; i++) {
     const mi = (aM - 1) + i;
     const mes = `${String(mi % 12 + 1).padStart(2, '0')}-${aY + Math.floor(mi / 12)}`;
     const [m, y] = mes.split('-').map(Number);
@@ -1154,45 +1202,79 @@ app.get('/api/projecao', (req, res) => {
     }
     fixosPorMes[mes] = soma;
   }
-  const totalFixos = fixosPorMes[`${String(aM).padStart(2, '0')}-${aY}`] || 0;
+  const totalFixos = fixosPorMes[mesAtualRef] || 0;
   const excluidosFixos = db.prepare(`SELECT r.descricao, r.valor FROM recorrencias r
     WHERE r.ativo=1 AND r.tipo='Recorrente' AND r.categoria_id = (SELECT id FROM categorias WHERE nome='Cartões')`).all();
 
   const meses = [];
-  for (let i = 0; i <= 12; i++) {
+  for (let i = 0; i < 12; i++) {
     const mi = (aM - 1) + i;
     meses.push(`${String(mi % 12 + 1).padStart(2, '0')}-${aY + Math.floor(mi / 12)}`);
   }
   const { obterFaturasAbertas } = require('./scripts/faturas-abertas');
   const faturasAbertas = obterFaturasAbertas(dataSimulada);
 
+  // MÊS ATUAL: compromisso vem da FONTE ÚNICA (compromisso-mes.js) — mesmo valor
+  // do painel 'Para onde vai cada real' e da Visão Geral (consistência garantida)
+  const { compromissoMes } = require('./scripts/compromisso-mes');
+  const compromissoMesAtual = compromissoMes(mesAtualRef);
+
   doMesCache = meses.map((m, mIdx) => {
     const doMes = compromissos.filter(c => c.mes === m);
-    // Para o próximo mês imediato (mIdx === 1, ex: 10-2026), substitui parcelas soltas pelas faturas abertas reais
-    if (mIdx === 1 && faturasAbertas && faturasAbertas.total > 0) {
+    const externasDetalhe = doMes.filter(c => c.origem === 'parcelado-fixos').map(d => ({ descricao: d.descricao, valor: d.valor, origem: d.origem }));
+    const externasValor = externasDetalhe.reduce((s, c) => s + c.valor, 0);
+
+    // Mês atual: compromisso da FONTE ÚNICA (real, se houver lançamentos)
+    if (m === mesAtualRef) {
+      const cartoesDetalhe = compromissoMesAtual.detalhe
+        .filter(d => d.grupo === 'faturas')
+        .map(d => ({ descricao: d.descricao, valor: d.valor, origem: 'fatura-mes' }));
+      const fixosDetalhe = compromissoMesAtual.detalhe
+        .filter(d => d.grupo === 'fixos')
+        .map(d => ({ descricao: d.descricao, valor: d.valor, origem: 'fixo-mes' }));
+      const parcelasDetalhe = compromissoMesAtual.detalhe
+        .filter(d => d.grupo === 'parcelas')
+        .map(d => ({ descricao: d.descricao, valor: d.valor, origem: 'parcela-mes' }));
+      return {
+        cartao: compromissoMesAtual.faturas,
+        externas: compromissoMesAtual.parcelas,
+        fixosUnicos: compromissoMesAtual.fixos,
+        detalhe: [...cartoesDetalhe, ...parcelasDetalhe, ...fixosDetalhe]
+      };
+    }
+
+    // Mês da fatura aberta (ex: próximo mês acumulando gastos)
+    if (faturasAbertas && m === faturasAbertas.mes_referencia && faturasAbertas.total > 0) {
       const cartoesDetalhe = faturasAbertas.cartoes.map(c => ({
         descricao: `Fatura Aberta ${c.nome}`,
         valor: c.total,
         origem: 'fatura-aberta',
         fonte: c.id
       }));
-      const externasDetalhe = doMes.filter(c => c.origem === 'parcelado-fixos').map(d => ({ descricao: d.descricao, valor: d.valor, origem: d.origem }));
       return {
         cartao: faturasAbertas.total,
-        externas: doMes.filter(c => c.origem === 'parcelado-fixos').reduce((s, c) => s + c.valor, 0),
+        externas: externasValor,
         detalhe: [...cartoesDetalhe, ...externasDetalhe]
       };
     }
+
+    // Meses futuros: parcelas contratadas
+    const cartoesDetalhe = doMes.filter(c => c.origem === 'cartao-futura').map(d => ({ descricao: d.descricao, valor: d.valor, origem: d.origem }));
+    const cartaoTotal = cartoesDetalhe.reduce((s, c) => s + c.valor, 0);
     return {
-      cartao: doMes.filter(c => c.origem === 'cartao-futura').reduce((s, c) => s + c.valor, 0),
-      externas: doMes.filter(c => c.origem === 'parcelado-fixos').reduce((s, c) => s + c.valor, 0),
-      detalhe: doMes.map(d => ({ descricao: d.descricao, valor: d.valor, origem: d.origem }))
+      cartao: cartaoTotal,
+      externas: externasValor,
+      detalhe: [...cartoesDetalhe, ...externasDetalhe]
     };
   });
+
   const serie = meses.map((m, mIdx) => {
     const cartaoMes = doMesCache[mIdx].cartao;
     const externasMes = doMesCache[mIdx].externas;
-    const fixosMes = fixosPorMes[m] || 0;
+    // mês atual: fixos reais da fonte única (lançamentos), senão periodicidade das recorrências
+    const fixosMes = m === mesAtualRef
+      ? (doMesCache[mIdx].fixosUnicos ?? (fixosPorMes[m] || 0))
+      : (fixosPorMes[m] || 0);
     const parcelas = cartaoMes + externasMes;
     return { mes: m, parcelas, fixos: fixosMes, total: parcelas + fixosMes };
   });
@@ -1246,22 +1328,21 @@ app.get('/api/projecao', (req, res) => {
     else db.prepare("INSERT INTO config (chave, valor) VALUES ('gasto_pix_variavel', ?)").run(String(gastoPixVariavel.toFixed(2)));
   }
 
-  // V2: comprometido + sobra livre (série do PRÓXIMO mês em diante) — exatamente 12 meses futuros
-  // DECISÃO 28/09/2026 (Evander): a série considera SÓ o que está REALMENTE comprometido —
-  //   1º mês = faturas abertas reais; meses seguintes = fixos + parcelas contratadas + parcelados.
-  //   Médias móveis (cartão à vista / PIX variável) NÃO entram na série: jogar média como
-  //   previsão de compromisso futuro mostrou ser enganoso (a média de itau-conta arrasta
-  //   IPTU anual, boletos de terreno, GCI e PIXs pontuais que não são compromisso mensal).
-  //   As camadas 3+4 continuam calculadas e exibidas como referência, fora da soma.
-  const mesAtualRef = `${String(aM).padStart(2, '0')}-${aY}`;
-  const parcelasExternasMensal = compromissos.filter(c => c.origem === 'parcelado-fixos')
-    .reduce((s, c) => s + c.valor, 0);
-  const comprometidoMensal = totalFixos + (doMesCache[0]?.cartao || 0) + (doMesCache[0]?.externas || 0);
+  // V2: comprometido + sobra livre — exatamente 12 meses (começando pelo mês atual)
+  // DECISÃO 08/10/2026 (Evander): mês 1 = compromisso da FONTE ÚNICA compromisso-mes.js
+  //   (real, dos lançamentos) — idêntico ao painel 'Para onde vai cada real';
+  //   2º mês = faturas abertas em tempo real;
+  //   meses seguintes = fixos + parcelas contratuais + parcelados.
+  //   Médias móveis (cartão à vista / PIX variável) NÃO entram na série.
+  const parcelasExternasMensal = doMesCache[0]?.externas || 0;
+  const comprometidoMensal = doMesCache[0]?.fixosUnicos != null
+    ? (doMesCache[0].fixosUnicos + (doMesCache[0]?.cartao || 0) + parcelasExternasMensal)
+    : (totalFixos + (doMesCache[0]?.cartao || 0) + parcelasExternasMensal);
 
   const { totalRendaRealizada } = require('./scripts/renda-realizada');
-  const serieV2 = serie.slice(1).map((s, idx) => {
-    const parcelasCartao = doMesCache[idx + 1].cartao;
-    const parcelasExternas = doMesCache[idx + 1].externas;
+  const serieV2 = serie.map((s, idx) => {
+    const parcelasCartao = doMesCache[idx].cartao;
+    const parcelasExternas = doMesCache[idx].externas;
     const fixosMes = s.fixos;
     const comprometido = fixosMes + parcelasCartao + parcelasExternas;
     const rendaMes = totalRendaRealizada(s.mes) || rendaProjetada;
@@ -1328,35 +1409,42 @@ app.get('/api/visao', async (req, res) => {
     const rendaRealizada = totalRendaRealizada(mesIso);
     const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1').all();
     const rendaEstimada = rendas.reduce((s, r) => s + (r.tipo === 'horas' ? (r.valor_hora || 0) * (r.horas_previstas || 168) : (r.valor_base || 0)), 0);
-    const rendaMes = rendaRealizada || rendaEstimada;
+    // CONSISTÊNCIA (08/10): mesma regra do painel 'Para onde vai cada real' — no meio do
+    // mês a renda estimada ainda é a melhor previsão (Cooper cai dia ~5, mas a AUVP pode
+    // atrasar); a realizada prevalece quando supera a estimada (horas extras Cooper)
+    const rendaMes = Math.max(rendaEstimada, rendaRealizada);
 
-    const fixos = db.prepare(`SELECT COALESCE(SUM(valor),0) t FROM recorrencias
-      WHERE ativo=1 AND tipo='Recorrente' AND categoria_id != (SELECT id FROM categorias WHERE nome='Cartões')`).get().t;
-    const parExt = db.prepare(`SELECT COALESCE(SUM(valor),0) t FROM recorrencias
-      WHERE ativo=1 AND tipo='Parcelado' AND total_parcelas IS NOT NULL
-        AND total_parcelas - COALESCE(parcela_atual,0) > 0`).get().t;
-    const { compromissosFuturos } = require('./scripts/parcelas-futuras');
-    const cf = compromissosFuturos();
-    const pcMes = cf.filter(x => { const [m, y] = x.mes.split('-'); return `${y}-${m}` === mesIso; }).reduce((s, x) => s + x.valor, 0);
-    const comprometido = fixos + parExt + pcMes;
+    // COMPROMISSO DO MÊS — FONTE ÚNICA (compromisso-mes.js), igual ao painel e à projeção
+    const { compromissoMes, gastoDiaADia } = require('./scripts/compromisso-mes');
+    const c = compromissoMes(mesRef);
+    const fixos = c.fixos;
+    const parExt = c.parcelas;
+    const cartaoMes = c.faturas;
+    const comprometido = c.total;
 
-    const gastoReal = db.prepare(`
-      SELECT COALESCE(SUM(ABS(valor)),0) tot FROM transacoes t
-      WHERE t.natureza='gasto' AND substr(t.data,1,7)=?
-        AND t.parcela IS NULL
-        AND t.id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)
-        AND t.id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas)`).get(mesIso).tot;
+    const gastoReal = gastoDiaADia(mesIso);
+
     const sobraMes = rendaMes - comprometido - gastoReal;
 
     const mesId = db.prepare('SELECT id FROM meses WHERE ref=?').get(mesRef);
+    const contasAPagar = mesId ? db.prepare(`
+      SELECT COALESCE(SUM(valor),0) tot FROM lancamentos
+      WHERE mes_id=? AND pago=0
+    `).get(mesId.id).tot : 0;
+    const totalContasPendentes = mesId ? db.prepare(`
+      SELECT count(*) tot FROM lancamentos
+      WHERE mes_id=? AND pago=0
+    `).get(mesId.id).tot : 0;
+    const saldoAposContas = disponivel - contasAPagar;
+
     const proximos = mesId ? db.prepare(`
       SELECT l.descricao, l.valor, l.vencimento, l.pago FROM lancamentos l
       WHERE l.mes_id=? AND l.pago=0 ORDER BY l.vencimento LIMIT 5`).all(mesId.id) : [];
 
     const { calendarioDividas } = require('./scripts/parcelas-futuras');
-    const c = calendarioDividas();
-    const dividaTotal = c.emAndamento.reduce((s, d) => s + d.valor * d.restam, 0);
-    const alivio3 = c.emAndamento.filter(d => {
+    const calDividas = calendarioDividas();
+    const dividaTotal = calDividas.emAndamento.reduce((s, d) => s + d.valor * d.restam, 0);
+    const alivio3 = calDividas.emAndamento.filter(d => {
       const [tM, tY] = d.termina.split('/').map(Number);
       return tY * 12 + tM <= (aY * 12 + aM) + 3;
     }).reduce((s, d) => s + d.valor, 0);
@@ -1382,6 +1470,9 @@ app.get('/api/visao', async (req, res) => {
     res.json({
       mes: mesRef, mes_iso: mesIso,
       disponivel: Math.round(disponivel * 100) / 100,
+      contas_a_pagar: Math.round(contasAPagar * 100) / 100,
+      total_contas_pendentes: totalContasPendentes,
+      saldo_apos_contas: Math.round(saldoAposContas * 100) / 100,
       faturas_abertas: Math.round(faturasAbertas * 100) / 100,
       fatura_proxima: Math.round(faturaProxima * 100) / 100,
       faturas_abertas_detalhe: faturasAbertasCalculadas,
@@ -1527,11 +1618,24 @@ app.post('/api/auvp/sync', async (req, res) => {
     db.prepare(`INSERT INTO sincronizacoes_auvp (tipo, resultados) VALUES ('sync', ?)`)
       .run(JSON.stringify({ contas: contas.resumo, agendadas: agendadas.length }));
     db.prepare("UPDATE config SET valor=datetime('now') WHERE chave='ultima_sync_auvp'").run();
+    // Re-conciliação automática: transações novas desde o último sync podem pagar contas do mês
+    let autoConciliados = 0;
+    try {
+      const { autoConciliarMes } = require('./scripts/conciliacao');
+      const r = autoConciliarMes(MES_ATUAL());
+      autoConciliados = r.conciliados || 0;
+    } catch (e) { console.error('[auvp/sync] auto-conciliar falhou (sem crash):', e.message); }
+    // Guardrail de consistência: painel ≈ projeção, dupla contagem, salário duplo
+    let consistencia = null;
+    try {
+      const { checarConsistencia } = require('./scripts/check-consistencia');
+      consistencia = checarConsistencia();
+    } catch (e) { /* guardrail nunca derruba o sync */ }
     try {
       const { gerarInsightsComIA } = require('./scripts/insights-ia');
       gerarInsightsComIA(true).catch(() => {});
     } catch (e) {}
-    res.json({ ok: true, contas: contas.resumo, agendadas: agendadas.length, contasLista: contas.contas });
+    res.json({ ok: true, contas: contas.resumo, agendadas: agendadas.length, contasLista: contas.contas, auto_conciliados: autoConciliados, consistencia });
   } catch (e) {
     res.status(500).json({ erro: e.message });
   }
@@ -1668,13 +1772,16 @@ app.post('/api/reconciliacao/previa', async (req, res) => {
       const f = fonteDe(t);
       const ehCartao = f === 'auvp-mcp' || tipoConta[t.conta] === 'CREDIT' || (t.conta && /credit|visa|master|black|gold/i.test(t.conta));
 
-      // 1. Transferência entre contas próprias
+      // 1. Transferência entre contas próprias ou resgate/aplicação automática
+      const ehAplicAuto = /(resgate|res|aplic|aplicacao).*(aplic\s*aut|aut\s*mais|aut\s*apr)/i.test(descLower);
       const ehTransfPropria = t.transferenciaInterna ||
-        /pix.*(mercado\s*pago|mercadopago|nubank|itau|titularidade)/i.test(descLower) ||
-        /transferencia.*(mesma\s*titularidade|entre\s*contas)/i.test(descLower);
+        /pix.*(mercado\s*pago|mercadopago|nubank|nu\s*pagamentos|itau|btg|titularidade)/i.test(descLower) ||
+        /transferencia.*(mesma\s*titularidade|entre\s*contas)/i.test(descLower) ||
+        ehAplicAuto;
 
       // 2. Pagamento de fatura de cartão (compensação positiva no cartão ou débito na conta)
       const ehPagtoFatura = /pagamento.*(debito|fatura|saldo|recebido)|fatura\s*paga|debito\s*aut.*fatura/i.test(descLower) ||
+        /pix.*nu\s*pagamentos/i.test(descLower) ||
         (ehCartao && /pagamento/i.test(descLower));
 
       // 3. Ignorada no banco
@@ -1684,7 +1791,11 @@ app.post('/api/reconciliacao/previa', async (req, res) => {
         let natureza = 'transferencia';
         let motivo = 'Pagamento de fatura (neutro)';
         let tipo = 'fatura';
-        if (ehTransfPropria) {
+        if (ehAplicAuto) {
+          natureza = 'ignorado';
+          motivo = 'Aplicação/Resgate automático (ocultado)';
+          tipo = 'ignorado';
+        } else if (ehTransfPropria) {
           natureza = 'transferencia-propria';
           motivo = 'Transferência entre contas próprias';
           tipo = 'entre-contas';
@@ -1804,7 +1915,23 @@ app.post('/api/reconciliacao/previa', async (req, res) => {
       }
       return true;
     });
-    resultado.entradas = entradasNovas;
+    // dedupe DENTRO do lote: o mesmo crédito às vezes chega 2x da AUVP com ids e
+    // descrições diferentes (ex: 'Salário LUIZALABS...' + 'Salário REMUNERACAO/SALARIO',
+    // mesmo valor/mesma data) — para salário, mantém só a primeira ocorrência
+    const vistosLote = [];
+    const entradasSemDup = [];
+    for (const t of entradasNovas) {
+      const dup = t.natureza === 'salario' && vistosLote.some(x =>
+        x.natureza === 'salario' &&
+        Math.abs(x.valor - t.valor) < 0.01 &&
+        Math.abs((new Date(x.data) - new Date(t.data)) / 86400000) <= 1
+      );
+      if (dup) continue;
+      vistosLote.push(t);
+      entradasSemDup.push(t);
+    }
+    const entradasDuplicadasLote = entradasNovas.length - entradasSemDup.length;
+    resultado.entradas = entradasSemDup;
     resultado.neutros = neutros.filter(n => !n.ja_existe);
     resultado.neutrosJaSalvos = neutros.filter(n => n.ja_existe).length;
 
@@ -1827,11 +1954,16 @@ app.post('/api/reconciliacao/previa', async (req, res) => {
       WHERE l.pago = 0 ORDER BY l.vencimento`).all();
     for (const n of resultado.novos) {
       let melhor = null;
+      const mesTx = (n.data || '').slice(0, 7);
+      const mesAgora = new Date().toISOString().slice(0, 7);
       for (const l of lancamentosAbertos) {
         if (Math.abs(n.valor - Math.abs(l.valor)) > 0.05) continue;
         const difData = Math.abs((new Date(n.data) - new Date(l.vencimento)) / 86400000);
         if (difData > 7) continue;
-        if (!melhor || difData < melhor.difData) melhor = { lancamento: l, difData };
+        // prioriza contas do mês da transação / mês atual; antigas só aparecem se nada melhor
+        const bonusMes = (l.mes_ref === mesTx || l.mes_ref === mesAgora) ? -1000 : 0;
+        const score = difData + bonusMes;
+        if (!melhor || score < melhor.score) melhor = { lancamento: l, difData, score };
       }
       if (melhor) {
         n.conta_do_mes = {
@@ -1845,7 +1977,7 @@ app.post('/api/reconciliacao/previa', async (req, res) => {
       id: l.id, descricao: l.descricao, vencimento: l.vencimento,
       valor: Math.abs(l.valor), mes_ref: l.mes_ref, recorrencia_id: l.recorrencia_id, parcela: l.parcela
     }));
-    res.json({ ok: true, periodo: { de, ate }, ...resultado, ia: iaInfo, abertos });
+    res.json({ ok: true, periodo: { de, ate }, ...resultado, ia: iaInfo, abertos, entradasDuplicadasLote });
   } catch (e) {
     res.status(500).json({ erro: e.message });
   }
@@ -1931,8 +2063,16 @@ app.post('/api/reconciliacao/aplicar', (req, res) => {
       }
     }
     require('./scripts/regras-seed').recategorizar();
+    // Re-conciliação automática: transações recém-inseridas podem pagar contas do mês
+    // (sem isso, boleto pago fica "gasto avulso" no dia a dia E conta em aberto = dupla contagem)
+    let autoConciliados = 0;
+    try {
+      const { autoConciliarMes } = require('./scripts/conciliacao');
+      const r = autoConciliarMes(MES_ATUAL());
+      autoConciliados = r.conciliados || 0;
+    } catch (e) { console.error('[reconciliacao/aplicar] auto-conciliar falhou:', e.message); }
     db.prepare("UPDATE config SET valor=datetime('now') WHERE chave='ultima_sync_auvp'").run();
-    res.json({ ok: true, inseridas, vinculadas, marcadasPagas, rendasGravadas });
+    res.json({ ok: true, inseridas, vinculadas, marcadasPagas, rendasGravadas, auto_conciliados: autoConciliados });
   } catch (e) {
     res.status(500).json({ erro: e.message });
   }

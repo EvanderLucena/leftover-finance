@@ -242,28 +242,24 @@ window.lançarRendaManual = async function (pendentes) {
 
   document.getElementById('vc-hero').innerHTML = `
     <div class="vc-main">
-      <span class="lbl">DISPONÍVEL EM CONTA</span>
+      <span class="lbl">DISPONÍVEL NO BANCO</span>
       <span class="num ${v.disponivel >= 0 ? 'up' : 'down'}">${fmt(v.disponivel)}</span>
-      <span class="sub muted">saldo bancário real · ${(v.quando || '').slice(0, 16)}</span>
-    </div>
-    <div class="vc-main" style="cursor:pointer;" onclick="abrirModalFaturasAbertas()" title="Clique para ver o raio-x das 3 faturas abertas">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span class="lbl">FATURAS ABERTAS (${mesFaLabel})</span>
-        <span style="font-size:11px; color:#4dabff; font-weight:700;">ver cartões ↗</span>
-      </div>
-      <span class="num down">${fmt(v.fatura_proxima)}</span>
-      <span class="sub muted">🟣 Nu ${fmt(cNu)} · 🟧 Itaú ${fmt(cItau)} · 💙 MP ${fmt(cMP)}</span>
+      <span class="sub muted">saldo real nas contas · ${(v.quando || '').slice(0, 16)}</span>
     </div>
     <div class="vc-main">
-      <span class="lbl">ENTRADAS PENDENTES</span>
-      <span class="num ${v.entradas_pendentes > 0 ? 'up' : 'neutral'}">${fmt(v.entradas_pendentes)}</span>
-      <span class="sub muted">${pendentes_sub}</span>
-      ${v.entradas_pendentes > 0 ? `<button type="button" class="ghost" style="margin-top:6px; padding:4px 10px; font-size:11.5px;" onclick="lançarRendaManual(${JSON.stringify(v.pendentes_detalhe || []).replace(/"/g, '&quot;')})">💸 Caiu no banco? Lançar agora</button>` : ''}
+      <span class="lbl">CONTAS A PAGAR (MÊS)</span>
+      <span class="num down">${fmt(v.contas_a_pagar)}</span>
+      <span class="sub muted">${v.total_contas_pendentes || 0} contas em aberto · faturas já quitadas</span>
     </div>
-    <div class="vc-main ${saldoPrevisto >= 0 ? 'sobra' : 'estouro'}">
-      <span class="lbl">SALDO PREVISTO APÓS FATURAS</span>
-      <span class="num ${saldoPrevisto >= 0 ? 'up' : 'down'}">${fmt(saldoPrevisto)}</span>
-      <span class="sub muted">disp. (${fmt(v.disponivel)}) + entradas (${fmt(v.entradas_pendentes)}) − faturas (${fmt(v.fatura_proxima)})</span>
+    <div class="vc-main ${(v.saldo_apos_contas || 0) >= 0 ? 'sobra' : 'estouro'}">
+      <span class="lbl">CAIXA LIVRE IMEDIATO</span>
+      <span class="num ${(v.saldo_apos_contas || 0) >= 0 ? 'up' : 'down'}">${(v.saldo_apos_contas || 0) >= 0 ? '+' : ''}${fmt(v.saldo_apos_contas)}</span>
+      <span class="sub muted">disp. (${fmt(v.disponivel)}) − contas a pagar (${fmt(v.contas_a_pagar)})</span>
+    </div>
+    <div class="vc-main ${(v.sobra_mes || 0) >= 0 ? 'sobra' : 'estouro'}">
+      <span class="lbl">SOBRA ESTIMADA DO MÊS</span>
+      <span class="num ${(v.sobra_mes || 0) >= 0 ? 'up' : 'down'}">${(v.sobra_mes || 0) >= 0 ? '+' : ''}${fmt(v.sobra_mes)}</span>
+      <span class="sub muted">renda (${fmt(v.renda_mes)}) − comprometido (${fmt(v.comprometido)}) · igual à projeção</span>
     </div>
     <div class="vc-progresso">
       <div class="lbl">MÊS: ${Math.round(pctDia)}% DECORRIDO</div>
@@ -307,7 +303,7 @@ window.lançarRendaManual = async function (pendentes) {
     red: '#ff4d5e'
   };
 
-  const sobraItem = f[f.length - 2]; // penúltimo: 'Sobra livre'/'Déficit' (última é a linha informativa de faturas)
+  const sobraItem = f.find(r => r.nome.includes('Sobra') || r.nome.includes('Déficit')) || f[f.length - 1];
   const elStatus = document.getElementById('flow-badge-status');
   if (elStatus && sobraItem) {
     if (sobraItem.negativo) {
@@ -321,7 +317,7 @@ window.lançarRendaManual = async function (pendentes) {
   if (elFluxo) {
     elFluxo.innerHTML = f.map((row, i) => {
       const isRenda = i === 0;
-      const isSobra = i === f.length - 2;
+      const isSobra = row.nome.includes('Sobra') || row.nome.includes('Déficit');
       const corFundo = cores[row.cor] || 'var(--muted)';
       const corTexto = isRenda ? 'var(--txt)' : (isSobra ? (row.negativo ? 'var(--red)' : 'var(--green)') : 'var(--txt)');
       const sinal = isSobra ? (row.negativo ? '−' : '+') : '';
@@ -345,25 +341,25 @@ window.lançarRendaManual = async function (pendentes) {
   }
 
   // Rodapé do fluxo com barra segmentada empilhada
-  // (faturas de cartão não são saída — pagamento interno; aparecem como linha informativa 🔁)
   const elRodape = document.getElementById('flow-resumo-rodape');
-  if (elRodape && f.length >= 5) {
-    const fix = f[1] || { pct: 0, valor: 0 };
-    const par = f[2] || { pct: 0, valor: 0 };
-    const varG = f[3] || { pct: 0, valor: 0 };
-    const fat = f[5] || { pct: 0, valor: 0 };
-    const totSaidas = fix.valor + par.valor + varG.valor;
+  if (elRodape && f.length >= 4) {
+    const fix = f.find(r => r.nome.includes('Fixos')) || { pct: 0, valor: 0 };
+    const fat = f.find(r => r.nome.includes('Faturas')) || { pct: 0, valor: 0 };
+    const par = f.find(r => r.nome.includes('Parcelas')) || { pct: 0, valor: 0 };
+    const varG = f.find(r => r.nome.includes('Gasto')) || { pct: 0, valor: 0 };
+    const totSaidas = fix.valor + fat.valor + par.valor + varG.valor;
     const pctTotal = Math.round((totSaidas / (f[0].valor || 1)) * 100);
 
     elRodape.innerHTML = `
       <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--line);">
-        <div style="display:flex; height:6px; border-radius:3px; overflow:hidden; gap:2px; margin-bottom:8px; background:rgba(255,255,255,0.04);" title="Distribuição das Saídas (faturas de cartão não somam — pagamento interno)">
+        <div style="display:flex; height:6px; border-radius:3px; overflow:hidden; gap:2px; margin-bottom:8px; background:rgba(255,255,255,0.04);" title="Distribuição do Comprometimento">
           <div style="width:${Math.min(100, fix.pct)}%; background:var(--blue);" title="Fixos: ${fix.pct}% (${fmt(fix.valor)})"></div>
+          <div style="width:${Math.min(100, fat.pct)}%; background:#ff4d5e;" title="Faturas: ${fat.pct}% (${fmt(fat.valor)})"></div>
           <div style="width:${Math.min(100, par.pct)}%; background:var(--amber);" title="Parcelas: ${par.pct}% (${fmt(par.valor)})"></div>
           <div style="width:${Math.min(100, varG.pct)}%; background:#b388ff;" title="Gasto dia a dia: ${varG.pct}% (${fmt(varG.valor)})"></div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--muted); flex-wrap:wrap; gap:6px;">
-          <span>Saídas: <b style="color:var(--txt);">${fmt(totSaidas)}</b> <span class="mono" style="font-size:11px;">(${pctTotal}% da renda)</span>${fat.valor ? ` <span class="mono" style="font-size:10.5px; opacity:.7;" title="Pagamento de fatura é dinheiro entre suas contas — gasto real já contado no mês da compra">· 🔁 faturas pagas ${fmt(fat.valor)} (interna)</span>` : ''}</span>
+          <span>Comprometido: <b style="color:var(--txt);">${fmt(totSaidas)}</b> <span class="mono" style="font-size:11px;">(${pctTotal}% da renda)</span></span>
           <span>${sobraItem?.negativo ? `<b style="color:var(--red);">Déficit: −${fmt(sobraItem.valor)}</b>` : `<b style="color:var(--green);">Sobra: +${fmt(sobraItem?.valor || 0)}</b>`}</span>
         </div>
       </div>`;
@@ -1403,7 +1399,7 @@ async function loadProjecao() {
   // médias móveis são exibidas como referência, fora da soma (não são compromisso mensal)
   document.getElementById('proj-camadas').innerHTML = `
     <div class="camadas-row"><span class="dot" style="background:#4dabff"></span><b>Fixos</b> ${fmt(p.fixos_mensais)}<span class="muted">— contas recorrentes mensais (aluguel, internet, saúde...)</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#ff4d5e"></span><b>Cartões de crédito</b> <span class="muted">— faturas abertas reais no 1º mês (${mesCurto(m1.mes)}: ${fmt(m1.parcelas_cartao)}) e parcelas contratuais nos meses seguintes</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#ff4d5e"></span><b>Cartões de crédito</b> <span class="muted">— faturas do mês (${mesCurto(m1.mes)}: ${fmt(m1.parcelas_cartao)}), faturas abertas e parcelas nos meses seguintes</span></div>
     <div class="camadas-row"><span class="dot" style="background:#f28b5b"></span><b>Parcelas externas</b> ${fmt(p.parcelas_externas_mensal)}<span class="muted">— parcelamentos avulsos fora do cartão (Airbnb, IPTU Mãe, Leão IRPF...)</span></div>
     <div class="camadas-row" style="opacity:.55;"><span class="dot" style="background:#ffa500"></span><b>Cartão à vista (ref. média 4m)</b> ${fmt(p.gasto_cartao_avista)}<span class="muted">— apenas referência; não é compromisso, não soma na sobra</span></div>
     <div class="camadas-row" style="opacity:.55;"><span class="dot" style="background:#9d7aff"></span><b>PIX/débito variável (ref. média 4m)</b> ${fmt(p.gasto_pix_variavel)}<span class="muted">— apenas referência; gasto real do dia a dia fica na Sobra livre</span></div>
@@ -1688,8 +1684,8 @@ window.togglePago = async function (id) {
   const rows = await api('/api/lancamentos?mes=' + mesAtual);
   const l = rows.find(x => x.id === id);
   if (!l) return;
-  // PAGANDO: sempre via dialog com transação verdadeira (ou "não achei" com confirmação)
-  if (!l.pago) { dialogAnexarPagamento(l, loadMes); return; }
+  // PAGANDO: abre dialog de anexar com opção de pular (não obrigatório)
+  if (!l.pago) { dialogAnexarPagamento(l, loadMes, { podePular: true }); return; }
   // DESMARCANDO: volta a em aberto direto
   await api('/api/lancamentos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: false, transacao_id: null }) });
   loadMes();
@@ -2228,7 +2224,8 @@ window.anexarConta = async function (lancId, txId) {
 };
 
 // ---------- dialog universal "anexar pagamento" (usado em Contas do mês e Reconciliar) ----------
-window.dialogAnexarPagamento = async function (lanc, aoConcluir) {
+window.dialogAnexarPagamento = async function (lanc, aoConcluir, opts = {}) {
+  const podePular = opts.podePular !== false;
   const modal = document.createElement('dialog');
   modal.className = 'dlg-anexar';
   modal.innerHTML = `
@@ -2243,6 +2240,7 @@ window.dialogAnexarPagamento = async function (lanc, aoConcluir) {
     <div class="dlg-anexar-lista" id="anx-lista"></div>
     <div class="dlg-anexar-foot">
       <span class="muted">a conta fica PAGA com a data da transação · valor atualizado pro real</span>
+      <button class="ghost" id="anx-pular">pular anexo — só marcar pago</button>
       <button class="ghost" id="anx-naoachei">não achei — marcar pago sem transação</button>
     </div>`;
   document.body.appendChild(modal);
@@ -2275,6 +2273,18 @@ window.dialogAnexarPagamento = async function (lanc, aoConcluir) {
   }
   modal.querySelector('#anx-busca').oninput = e => { clearTimeout(modal._t); modal._t = setTimeout(() => carregar(e.target.value), 250); };
   modal.querySelector('.dlg-x').onclick = () => modal.remove();
+  if (podePular) {
+    modal.querySelector('#anx-pular').onclick = async () => {
+      await api('/api/lancamentos/' + lanc.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: true }) });
+      modal.remove();
+      toast('PAGA (sem transação anexada — pode anexar depois clicando nela)');
+      await api('/api/projecao?recalcular=1').catch(() => {});
+      aoConcluir && aoConcluir();
+    };
+  } else {
+    const p = modal.querySelector('#anx-pular');
+    if (p) p.remove();
+  }
   modal.querySelector('#anx-naoachei').onclick = async () => {
     const btn = modal.querySelector('#anx-naoachei');
     if (btn.dataset.conf !== '1') { btn.textContent = 'confirmar: pagar sem transação anexada?'; btn.dataset.conf = '1'; btn.style.color = 'var(--amber)'; return; }
@@ -2370,8 +2380,11 @@ function cardNovo(n, i) {
       ${n.parcela ? `<span class="fbadge" style="color:var(--cyan); border-color:rgba(0,214,143,.3);">${n.parcela}</span>` : ''}
       ${conta && !n._marcarPaga ? `<span class="match" style="margin:0;">↔ <b>${conta.descricao.slice(0, 20)}</b></span>` : ''}
     </div>
-    <div style="display:flex; gap:6px; margin-top:7px;">
-      <button class="btn-paga ${n._marcarPaga ? 'on' : ''}" style="margin-top:0; flex:1;" onclick="event.stopPropagation(); recAbrirSeletor(${i})">${n._marcarPaga && conta ? 'paga ' + conta.descricao.slice(0, 24) + ' (venc ' + conta.vencimento + ')' : 'marcar como conta do mês…'}</button>
+    <div style="display:flex; gap:6px; margin-top:7px; align-items:center;">
+      ${n.parcela
+        ? `<span class="muted" style="font-size:11.5px; flex:1; color:var(--cyan); display:flex; align-items:center; gap:4px;">${ico('check')} Parcela vincula automaticamente à compra</span>`
+        : `<button class="btn-paga ${n._marcarPaga ? 'on' : ''}" style="margin-top:0; flex:1;" onclick="event.stopPropagation(); recAbrirSeletor(${i})">${n._marcarPaga && conta ? 'paga ' + conta.descricao.slice(0, 24) + ' (venc ' + conta.vencimento + ')' : 'marcar como conta do mês…'}</button>`
+      }
       <button class="ghost" style="padding:4px 8px; font-size:11.5px; border:1px solid var(--border); border-radius:7px; color:var(--muted); white-space:nowrap;" onclick="event.stopPropagation(); recMoverParaOcultar('novos', ${i})" title="Ocultar transação: salva no banco como neutra, não afeta totais e nunca mais reaparece">👁️ Ocultar</button>
     </div>
   </div>`;
@@ -2524,7 +2537,8 @@ function renderReconciliacao() {
                   <button class="ghost" style="padding:3px 8px; font-size:11px; border:1px solid var(--border); border-radius:6px; color:var(--muted);" onclick="event.stopPropagation(); recEntradaEntreContas(${i})" title="É dinheiro se movendo entre suas contas (ex: resgate de aplicação pra cobrir PIX) — marca como transferência própria, sem contar como renda">↔ Entre contas</button>
                   <button class="ghost" style="padding:3px 8px; font-size:11px; border:1px solid var(--border); border-radius:6px; color:var(--muted);" onclick="event.stopPropagation(); recMoverParaOcultar('entradas', ${i})" title="Ocultar transação: salva no banco como neutra, não afeta totais e nunca mais reaparece">👁️ Ocultar</button>
                 </span>
-              </div>`).join('')}
+              </div>
+            </div>`).join('')}
         </div>`;
     }
   } else if (recAbaAtiva === 'fracos') {
@@ -2710,7 +2724,16 @@ window.recForcarVinculo = function (i) {
 window.recAbrirSeletor = function (i) {
   const n = recPrevia.novos[i];
   if (!n) return;
-  const abertos = recPrevia.abertos || [];
+  const mesTx = (n.data || '').slice(0, 7);
+  const hojeRef = new Date();
+  const mesHoje = `${hojeRef.getFullYear()}-${String(hojeRef.getMonth() + 1).padStart(2, '0')}`;
+  const abertosRaw = recPrevia.abertos || [];
+  const score = l => {
+    const dLanc = Math.abs((new Date(l.vencimento) - new Date(n.data)) / 86400000);
+    const mesmoMes = (l.mes_ref === mesTx || l.mes_ref === mesHoje) ? -1000 : 0;
+    return dLanc + mesmoMes + Math.abs((l.valor || 0) - Math.abs(n.valor || 0)) * 0.01;
+  };
+  const abertos = abertosRaw.map((l, idx) => ({ l, idx })).sort((a, b) => score(a.l) - score(b.l)).map(o => o.l);
   const atual = n._lancamentoManual || '';
   const modal = document.createElement('dialog');
   modal.innerHTML = `

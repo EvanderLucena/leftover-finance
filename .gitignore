@@ -62,6 +62,8 @@ app/node_modules/
 # ==============================================================================
 app/scripts/*
 !app/scripts/auvp-client.js
+!app/scripts/check-consistencia.js
+!app/scripts/compromisso-mes.js
 !app/scripts/conciliacao.js
 !app/scripts/contas.js
 !app/scripts/faturas-abertas.js

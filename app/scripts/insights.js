@@ -1,122 +1,63 @@
-// Motor de insights: analisa transações e gera mensagens automáticas
+// insights.js — fluxo 'Para onde vai cada real' (visão CAIXA, decisão 08/10/2026)
+//
+// CONSISTÊNCIA: usa compromisso-mes.js — a MESMA fonte da Visão Geral e da Projeção.
+// Linhas: Renda · Fixos & moradia · Faturas de cartão · Parcelas & dívidas ·
+//         Gasto do dia a dia · Sobra/Déficit
+// Sem dupla contagem: boleto que pagou conta fica nos Fixos (via lançamento);
+// dia a dia conta só o que saiu da conta sem pagar lançamento e sem ser crédito.
+
 const db = require('../db');
+const { compromissoMes, gastoDiaADia } = require('./compromisso-mes');
 
-function fmt(v) { return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-
-// fontes de fatura de cartão (mesma lista do server — multi-fonte)
-const FONTES_CARTAO = ['nubank', 'itau-fatura', 'mercadopago', 'auvp-mcp'];
-const sqlFontesCartao = () => `fonte IN (${FONTES_CARTAO.map(() => '?').join(',')})`;
+// fmt e gerarInsights permanecem como estavam (insights de contas/dívidas/recorrências)
+function fmt(v) { return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 function gerarInsights() {
   const insights = [];
-
-  // 1. Cartão à vista: mês atual vs média anterior
-  const avistaPorMes = db.prepare(`
-    SELECT substr(data,1,7) mes, SUM(CASE WHEN parcela IS NULL THEN ABS(valor) ELSE 0 END) avista
-    FROM transacoes WHERE natureza='gasto' AND ${sqlFontesCartao()}
-    GROUP BY mes ORDER BY mes`).all(...FONTES_CARTAO);
-  if (avistaPorMes.length >= 3) {
-    let atual = avistaPorMes[avistaPorMes.length - 1];
-    // pula mês corrente se tem poucas transações (fatura ainda aberta)
-    const txAtual = db.prepare(`SELECT COUNT(*) n FROM transacoes WHERE natureza='gasto' AND ${sqlFontesCartao()} AND substr(data,1,7)=?`).get(...FONTES_CARTAO, atual.mes);
-    if (txAtual.n < 10) {
-      const penultimo = avistaPorMes[avistaPorMes.length - 2];
-      if (penultimo) atual = penultimo;
-    }
-    const anteriores = avistaPorMes.filter(m => m.mes < atual.mes);
-    if (anteriores.length >= 2) {
-      const media = anteriores.reduce((s, m) => s + m.avista, 0) / anteriores.length;
-      const diff = (atual.avista - media) / media;
-      if (Math.abs(diff) > 0.3) {
-        const dir = diff > 0 ? 'subiu' : 'caiu';
-        insights.push({
-          tipo: diff > 0 ? 'bad' : 'good',
-          icone: diff > 0 ? '🔥' : '💚',
-          titulo: `Cartão à vista ${dir} ${Math.abs(Math.round(diff * 100))}% em ${atual.mes}`,
-          texto: `R$ ${atual.avista.toFixed(0)} vs média de R$ ${media.toFixed(0)} dos meses anteriores. ${diff > 0 ? 'Vale revisar as maiores compras do mês.' : 'Boa contenção!'}`
-        });
-      }
-    }
-  }
-
-  // 2. Pico de comprometimento nos próximos meses (módulo único de parcelas futuras)
   try {
-    const { compromissosFuturos, calendarioDividas } = require('./parcelas-futuras');
-    const compromissos = compromissosFuturos().map(c => ({ mes: c.mes, valor: c.valor }));
-    // parcelados da planilha também
-    const hoje2 = new Date();
-    const aY2 = hoje2.getFullYear(), aM2 = hoje2.getMonth() + 1;
-    const parcelados = db.prepare(`SELECT descricao, valor, total_parcelas, parcela_atual FROM recorrencias WHERE ativo=1 AND tipo='Parcelado' AND total_parcelas IS NOT NULL`).all();
-    for (const p of parcelados) {
-      const restam = p.total_parcelas - (p.parcela_atual || 0);
-      for (let i = 1; i <= restam; i++) {
-        const mi = (aM2 - 1) + i;
-        compromissos.push({ mes: `${String(mi % 12 + 1).padStart(2, '0')}-${aY2 + Math.floor(mi / 12)}`, valor: p.valor });
+    const cfg = db.prepare("SELECT valor FROM config WHERE chave='mes_atual'").get();
+    const ref = cfg?.valor;
+    const hoje = new Date().toISOString().slice(0, 10);
+    if (ref) {
+      const mes = db.prepare('SELECT id FROM meses WHERE ref=?').get(ref);
+      if (mes) {
+        const vencidas = db.prepare(`SELECT l.descricao, l.vencimento, l.valor FROM lancamentos l
+          WHERE l.mes_id=? AND l.pago=0 AND l.vencimento < ?`).all(mes.id, hoje);
+        if (vencidas.length) {
+          insights.push({
+            tipo: 'warn', icone: '⏰',
+            titulo: `${vencidas.length} conta(s) vencida(s) em ${ref}`,
+            texto: vencidas.map(v => `${v.descricao} (${fmt(v.valor)}, venc ${v.vencimento})`).join(' · ')
+          });
+        }
       }
-    }
-    const cfgPix = db.prepare("SELECT valor FROM config WHERE chave='gasto_pix_variavel'").get();
-    const cfgCartao = db.prepare("SELECT valor FROM config WHERE chave='gasto_cartao_avista'").get();
-    const fixos = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM recorrencias WHERE ativo=1 AND tipo='Recorrente' AND categoria_id != (SELECT id FROM categorias WHERE nome='Cartões')").get().t;
-    const pixVar = cfgPix ? parseFloat(cfgPix.valor) : 0;
-    const cartaoAv = cfgCartao ? parseFloat(cfgCartao.valor) : 0;
-    const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1').all();
-    const renda = rendas.reduce((s, r) => s + (r.tipo === 'horas' ? (r.valor_hora || 0) * (r.horas_previstas || 168) : (r.valor_base || 0)), 0);
-
-    const serie = [];
-    for (let i = 0; i < 12; i++) {
-      const mi = (aM2 - 1) + i;
-      const mes = `${String(mi % 12 + 1).padStart(2, '0')}-${aY2 + Math.floor(mi / 12)}`;
-      const parc = compromissos.filter(c => c.mes === mes).reduce((s, c) => s + c.valor, 0);
-      serie.push({ mes, parcelas: parc, total: fixos + parc + pixVar + cartaoAv });
-    }
-    const picos = [...serie].sort((a, b) => b.total - a.total);
-    if (picos.length && picos[0].total > renda * 0.9) {
-      insights.push({
-        tipo: 'warn', icone: '📅',
-        titulo: `${picos[0].mes} é seu pico: ${fmt(picos[0].total)} comprometidos`,
-        texto: `Fica ${fmt(renda - picos[0].total)} de folga. Reserve agora — é ${Math.round(picos[0].total / renda * 100)}% da renda.`
-      });
-    }
-    // 2b. escada de liberação: quanto a sobra sobe nos próximos 90 dias
-    const divs = calendarioDividas();
-    const libProx = (divs.emAndamento || []).filter(d => {
-      const [mm, yy] = d.termina.split('/').map(Number);
-      const diff = (yy * 12 + mm) - (aY2 * 12 + aM2);
-      return diff >= 1 && diff <= 3;
-    });
-    if (libProx.length) {
-      const alivio = libProx.reduce((s, d) => s + d.valor, 0);
-      insights.push({
-        tipo: 'good', icone: '🪜',
-        titulo: `Escada de liberação: +${fmt(alivio)}/mês até ${libProx[libProx.length - 1].termina}`,
-        texto: libProx.map(d => `${d.descricao.slice(0, 18)} sai em ${d.termina} (+${fmt(d.valor)})`).join(' · ')
-      });
     }
   } catch (e) { /* silencioso */ }
 
-  // 3. parcelas que terminam em breve (alívio próximo) — usa calendário corrigido
   try {
     const { calendarioDividas } = require('./parcelas-futuras');
-    const divs = calendarioDividas();
-    const prox = (divs.emAndamento || []).filter(d => d.restam <= 2).sort((a, b) => a.restam - b.restam);
-    if (prox.length) {
-      const p = prox[0];
+    const c = calendarioDividas();
+    const terminando = (c.emAndamento || []).filter(d => {
+      const [tM, tY] = d.termina.split('/').map(Number);
+      return tY * 12 + tM <= new Date().getFullYear() * 12 + (new Date().getMonth() + 1) + 2;
+    });
+    if (terminando.length) {
       insights.push({
-        tipo: 'good', icone: '🎉',
-        titulo: `${p.descricao.slice(0, 28)} termina em ${p.restam} ${p.restam === 1 ? 'mês' : 'meses'} (${p.termina})`,
-        texto: `Restam ${p.restam}x ${fmt(p.valor)}. Depois disso sua sobra mensal sobe ${fmt(p.valor)}.`
+        tipo: 'good', icone: '🏁',
+        titulo: `${terminando.length} dívida(s) quitam em ≤3 meses`,
+        texto: terminando.map(d => `${d.descricao} (fim ${d.termina})`).join(' · ')
       });
     }
   } catch (e) { /* silencioso */ }
 
-  // 4. streak de pagamentos (meses com todas as contas pagas)
   try {
-    const meses = db.prepare(`
-      SELECT m.ref, SUM(CASE WHEN l.pago=0 THEN 1 ELSE 0 END) abertas
-      FROM meses m JOIN lancamentos l ON l.mes_id=m.id
-      GROUP BY m.id ORDER BY m.ref`).all();
+    const streakQuery = db.prepare(`
+      SELECT m.ref, COUNT(*) abertas FROM meses m
+      JOIN lancamentos l ON l.mes_id = m.id
+      WHERE l.pago = 0 AND l.vencimento < date('now')
+      GROUP BY m.ref ORDER BY m.ref DESC LIMIT 6`).all();
     let streak = 0;
-    for (const m of [...meses].reverse()) {
+    for (const m of streakQuery) {
       if (m.abertas === 0) streak++;
       else break;
     }
@@ -129,7 +70,6 @@ function gerarInsights() {
     }
   } catch (e) { /* silencioso */ }
 
-  // 5. recorrências ativas
   try {
     const recs = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(valor),0) total FROM recorrencias WHERE ativo=1`).get();
     if (recs.n > 0) {
@@ -141,13 +81,12 @@ function gerarInsights() {
     }
   } catch (e) { /* silencioso */ }
 
-  // 6. maior gasto variável do último mês importado
   try {
     const top = db.prepare(`
       SELECT descricao, SUM(ABS(valor)) tot, COUNT(*) n FROM transacoes
-      WHERE natureza='gasto' AND valor < -100 AND ${sqlFontesCartao()}
+      WHERE natureza='gasto' AND valor < -100
       AND substr(data,1,7) = (SELECT MAX(substr(data,1,7)) FROM transacoes)
-      GROUP BY descricao ORDER BY tot DESC LIMIT 1`).get(...FONTES_CARTAO);
+      GROUP BY descricao ORDER BY tot DESC LIMIT 1`).get();
     if (top && top.tot > 300) {
       insights.push({
         tipo: 'warn', icone: '💸',
@@ -160,74 +99,29 @@ function gerarInsights() {
   return insights;
 }
 
-// fluxo do mês — fixos + parcelados + gastos variáveis vs renda
-// DECISÃO 30/09/2026 (Evander): faturas de cartão NÃO são saída no fluxo — pagamento de fatura
-// é dinheiro se movendo entre contas do próprio usuário (conta ↔ cartão), e o gasto real de cada
-// compra já é contado no mês da COMPRA (gastoReal abaixo). Contar a fatura no mês de vencimento
-// dobraria o gasto e puniria o mês com déficit falso (set/26: −3.217 vira +4.595 de sobra).
+// fluxo do mês — VISÃO CAIXA (consistente com Visão Geral e Projeção)
 function gerarFluxo(mesRef = null) {
   const ref = mesRef || db.prepare("SELECT valor FROM config WHERE chave='mes_atual'").get()?.valor || '09-2026';
   const [mM, yY] = ref.split('-');
   const mesIso = `${yY}-${mM}`;
 
-  // 1. Renda líquida do mês (estimada base ou realizada)
+  // 1. Renda líquida do mês (realizada se existir; senão estimada)
   const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1').all();
   const rendaEstimada = rendas.reduce((s, r) => s + (r.tipo === 'horas' ? (r.valor_hora || 0) * (r.horas_previstas || 168) : (r.valor_base || 0)), 0);
   let rendaRealizada = 0;
   try {
     const { totalRendaRealizada } = require('./renda-realizada');
     rendaRealizada = totalRendaRealizada(mesIso) || 0;
-  } catch(e) {}
+  } catch (e) {}
   const renda = Math.max(rendaEstimada, rendaRealizada) || 14986.17;
 
-  // 2. Contas do mês (lancamentos) — faturas de cartão EXCLUÍDAS (pagamento interno)
-  const mesRow = db.prepare('SELECT id FROM meses WHERE ref=?').get(ref);
-  let fixos = 0;
-  let faturasCartao = 0;
-  let parcelas = 0;
+  // 2. Compromisso do mês — FONTE ÚNICA (compromisso-mes.js)
+  const c = compromissoMes(ref);
 
-  if (mesRow) {
-    const lancs = db.prepare(`
-      SELECT l.*, c.nome as cat FROM lancamentos l
-      LEFT JOIN categorias c ON c.id = l.categoria_id
-      WHERE l.mes_id = ?
-    `).all(mesRow.id);
+  // 3. Gasto do dia a dia — só o que saiu da conta sem pagar lançamento (sem crédito)
+  const diaADia = gastoDiaADia(mesIso);
 
-    for (const l of lancs) {
-      if (l.cat === 'Cartões') {
-        faturasCartao += l.valor; // rastreado p/ contexto, mas FORA da saída (decisão 30/09)
-      } else if (l.parcela || (l.cat === 'Dívida' && l.descricao !== 'Condomínio')) {
-        parcelas += l.valor;
-      } else {
-        fixos += l.valor;
-      }
-    }
-  }
-
-  // Fallback para meses sem lançamentos salvos
-  if (!mesRow || (fixos + parcelas === 0)) {
-    fixos = db.prepare("SELECT COALESCE(SUM(valor),0) t FROM recorrencias WHERE ativo=1 AND tipo='Recorrente' AND categoria_id != (SELECT id FROM categorias WHERE nome='Cartões')").get().t;
-    parcelas = db.prepare(`
-      SELECT COALESCE(SUM(valor),0) t FROM recorrencias
-      WHERE ativo=1 AND tipo='Parcelado' AND total_parcelas IS NOT NULL
-        AND total_parcelas - COALESCE(parcela_atual,0) > 0`).get().t;
-    try {
-      const { obterFaturasAbertas } = require('./faturas-abertas');
-      faturasCartao = obterFaturasAbertas().total || 0;
-    } catch(e) {}
-  }
-
-  // 3. Gastos variáveis reais do mês (à vista, PIX e débito fora de contas e parcelas)
-  //    — aqui mora o gasto REAL do mês, incluindo as compras de cartão do mês (data da compra)
-  const gastoReal = db.prepare(`
-    SELECT COALESCE(SUM(ABS(valor)),0) tot FROM transacoes t
-    WHERE t.natureza='gasto' AND substr(t.data,1,7)=?
-      AND t.parcela IS NULL
-      AND t.id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)
-      AND t.id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas)`).get(mesIso).tot;
-
-  // Saída efetiva: fixos + parcelas + gasto real (sem faturas — pagamento interno não sai)
-  const totalSaidas = fixos + parcelas + gastoReal;
+  const totalSaidas = c.fixos + c.faturas + c.parcelas + diaADia;
   const saldoFinal = renda - totalSaidas;
   const pctComprometido = renda > 0 ? Math.round((totalSaidas / renda) * 100) : 0;
   const pct = v => renda > 0 ? Math.round((v / renda) * 1000) / 10 : 0;
@@ -244,26 +138,34 @@ function gerarFluxo(mesRef = null) {
     {
       nome: 'Fixos & moradia',
       icone: '🏠',
-      valor: Math.round(fixos * 100) / 100,
+      valor: c.fixos,
       cor: 'blue',
-      pct: pct(fixos),
-      detalhe: 'Aluguel, energia, internet, saúde'
+      pct: pct(c.fixos),
+      detalhe: c.origem === 'lancamentos' ? 'Contas do mês (módulo Contas)' : 'Recorrências ativas'
+    },
+    {
+      nome: 'Faturas de cartão',
+      icone: '💳',
+      valor: c.faturas,
+      cor: 'red',
+      pct: pct(c.faturas),
+      detalhe: 'Nubank, Itaú e Mercado Pago (saída real do mês)'
     },
     {
       nome: 'Parcelas & dívidas',
       icone: '⚖️',
-      valor: Math.round(parcelas * 100) / 100,
+      valor: c.parcelas,
       cor: 'amber',
-      pct: pct(parcelas),
+      pct: pct(c.parcelas),
       detalhe: 'Leão, IPTU, financiamentos'
     },
     {
       nome: 'Gasto do dia a dia',
       icone: '🛒',
-      valor: Math.round(gastoReal * 100) / 100,
+      valor: Math.round(diaADia * 100) / 100,
       cor: 'purple',
-      pct: pct(gastoReal),
-      detalhe: 'Mesmo mes de consumo: PIX, débito, compras à vista E cartão (data real da compra)'
+      pct: pct(diaADia),
+      detalhe: 'PIX/débito/boleto avulso — compras no crédito entram na fatura'
     },
     {
       nome: saldoFinal >= 0 ? 'Sobra livre' : 'Déficit / Pressão',
@@ -273,14 +175,6 @@ function gerarFluxo(mesRef = null) {
       cor: saldoFinal >= 0 ? 'green' : 'red',
       pct: pct(Math.abs(saldoFinal)),
       detalhe: saldoFinal >= 0 ? 'Livre para poupar/investir' : `${pctComprometido}% da renda comprometida`
-    },
-    {
-      nome: 'Faturas pagas (interna)',
-      icone: '🔁',
-      valor: Math.round(faturasCartao * 100) / 100,
-      cor: 'muted',
-      pct: pct(faturasCartao),
-      detalhe: 'Pagamento de fatura = dinheiro entre suas contas, não é saída (gasto real já contado no mês da compra)'
     }
   ];
 }
@@ -294,7 +188,6 @@ function gerarHealth() {
   const saldoFinal = sobraObj.negativo ? -sobraObj.valor : sobraObj.valor;
   const comprometido = renda - saldoFinal;
   const pctLivre = sobraObj.negativo ? 0 : Math.round(sobraObj.pct);
-  // dívida total = calendário corrigido (parcelados fixos + parcelas de cartão)
   const divs = calendarioDividas();
   const dividaTotal = (divs.emAndamento || []).reduce((s, d) => s + d.restam * d.valor, 0);
   const alivioMensal = (divs.emAndamento || []).reduce((s, d) => s + d.valor, 0);
