@@ -41,113 +41,105 @@ function padraoConfirmado(descricao) {
   return null;
 }
 
-// motor principal: cruza transações dos últimos N dias com lançamentos em aberto
-function conciliar(diasJanela = 45) {
-  const TOL_VALOR = 0.12;   // 12% de tolerância de valor
-  const DIA_TOL = 7;        // ±7 dias de vencimento
+// ---------- REGRA ÚNICA de casamento conta do mês × transação (15/10/2026) ----------
+// Usada pelas sugestões do Reconciliar e pela conciliação automática, para as duas nunca discordarem.
+// - só transação de conta (PIX, boleto, débito); compra no cartão já está na fatura
+// - só o que já aconteceu, ainda não pagou outra conta e não foi recusado para este par
+// - janela: de 15 dias antes a 10 dias depois do vencimento
+// - "certo": identidade (termo da recorrência, palavra da descrição ou padrão já confirmado por você)
+//   + valor até 15% (mín. R$ 15) de diferença; é o único nível que a conciliação automática aplica, e só sem ambiguidade
+// - "sugerido": identidade com valor mais distante (até 50%), ou valor idêntico sem identidade
+//   (ex.: um PIX genérico de valor exato no dia do vencimento); só vira pago quando você confirma
+const JANELA_ANTES = 15, JANELA_DEPOIS = 10;
+const FONTES_CARTAO = ['auvp-mcp', 'itau-fatura', 'nubank', 'mercadopago'];
+const r2 = v => Math.round(v * 100) / 100;
+const hojeISO = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+const dias = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 864e5);
 
-  const txs = db.prepare(`
-    SELECT * FROM transacoes
-    WHERE natureza='gasto' AND valor < 0
-    AND data >= date('now', '-' || ? || ' days')
-    AND id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas)
-    ORDER BY data DESC`).all(String(diasJanela));
+function termosDe(l) {
+  const termos = [];
+  if (l.padrao_busca) l.padrao_busca.split('|').forEach(t => t.trim() && termos.push(t.trim().toUpperCase()));
+  l.descricao.toUpperCase().replace(/\(.*?\)/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .split(/\s+/).filter(w => w.length >= 4 && !/^\d/.test(w)).forEach(w => termos.push(w));
+  return termos;
+}
 
-  const previstos = db.prepare(`
-    SELECT l.*, m.ref mes_ref, c.nome categoria_nome, r.id rec_id
-    FROM lancamentos l
+function avaliarPar(l, t) {
+  const lVal = Math.abs(l.valor), tVal = Math.abs(t.valor);
+  const difData = dias(t.data, l.vencimento);
+  if (difData < -JANELA_ANTES || difData > JANELA_DEPOIS) return null;
+  const difVal = Math.abs(tVal - lVal);
+  const desc = t.descricao.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const conf = padraoConfirmado(t.descricao);
+  const identidade = termosDe(l).some(termo => desc.includes(termo))
+    || !!(conf && l.descricao.toLowerCase().startsWith(conf.descricao_lancamento.toLowerCase().slice(0, 12)));
+  let nivel = null;
+  if (identidade && difVal <= Math.max(lVal * 0.15, 15)) nivel = 'certo';
+  else if (identidade && difVal <= lVal * 0.5) nivel = 'sugerido';
+  else if (difVal <= 0.05) nivel = 'sugerido';
+  if (!nivel) return null;
+  return { nivel, identidade, difVal: r2(difVal), difData, score: difVal + Math.abs(difData) * 2 + (identidade ? 0 : 20) };
+}
+
+// todos os pares possíveis, já filtrados pelas restrições comuns
+function paresCandidatos({ mesId = null, hoje = hojeISO() } = {}) {
+  const lancs = db.prepare(`SELECT l.*, r.padrao_busca, m.ref mes_ref FROM lancamentos l
     JOIN meses m ON m.id = l.mes_id
     LEFT JOIN categorias c ON c.id = l.categoria_id
     LEFT JOIN recorrencias r ON r.id = l.recorrencia_id
-    WHERE l.pago = 0 ORDER BY l.vencimento`).all();
-
-  const regras = db.prepare('SELECT * FROM regras WHERE ativa=1 ORDER BY prioridade').all();
-  const fmt2 = v => 'R$ ' + Math.abs(v).toFixed(2);
-
-  const sugestoes = [];
-  const usadosTx = new Set();
-  const usadosLanc = new Set();
-
-  for (const t of txs) {
-    if (usadosTx.has(t.id)) continue;
-    const tVal = Math.abs(t.valor);
-
-    // 1) histórico de confirmação tem prioridade máxima
-    const conf = padraoConfirmado(t.descricao);
-    if (conf) {
-      // acha lançamento em aberto com descrição parecida com a confirmada
-      const alvo = previstos.find(p =>
-        !usadosLanc.has(p.id) &&
-        p.descricao.toLowerCase().includes(conf.descricao_lancamento.toLowerCase().slice(0, 12))
-      );
-      if (alvo) {
-        const difVal = Math.abs(tVal - Math.abs(alvo.valor));
-        const difData = Math.abs((new Date(t.data) - new Date(alvo.vencimento)) / 86400000);
-        if (difVal <= Math.max(Math.abs(alvo.valor) * 0.2, 25) && difData <= 10) {
-          sugestoes.push({
-            transacao_id: t.id, lancamento_id: alvo.id,
-            transacao: t.descricao.slice(0, 30) + ' · ' + t.data + ' · ' + fmt2(t.valor),
-            previsto: alvo.descricao + ' ' + (alvo.parcela || '') + ' (venc ' + alvo.vencimento + ')',
-            previstoValorPrevisto: fmt2(alvo.valor),
-            transacaoValorReal: fmt2(t.valor),
-            difVal: +difVal.toFixed(2), difData: Math.round(difData),
-            fonte: 'historico', score: 0
-          });
-          usadosTx.add(t.id); usadosLanc.add(alvo.id);
-          continue;
-        }
-      }
-    }
-
-    // 2) matching por valor + data + regra semântica
-    //    - regra semântica com valor tolerante (caso "SABESP → Casa")
-    //    - VALOR EXATO (±0,05) + data próxima = match forte mesmo sem regra
-    //      (PIX genérico "Pix para ITAU UNIBANCO" paga o Pilates de 250 — não há
-    //       regra que descreva isso, mas valor idêntico + 1d do venc é confiança alta)
-    let melhor = null;
-    for (const p of previstos) {
-      if (usadosLanc.has(p.id)) continue;
-      const difVal = Math.abs(tVal - Math.abs(p.valor));
-      const tolVal = Math.max(Math.abs(p.valor) * TOL_VALOR, 15);
-      if (difVal > tolVal) continue;
-      const difData = Math.abs((new Date(t.data) - new Date(p.vencimento)) / 86400000);
-      if (difData > DIA_TOL) continue;
-      const catLanc = (p.categoria_nome || '').toLowerCase();
-      let semantica = false;
-      for (const r of regras) {
-        try { if (!new RegExp(r.padrao, 'i').test(t.descricao)) continue; } catch (e) { continue; }
-        if (r.categoria && catLanc && r.categoria.toLowerCase() === catLanc.toLowerCase()) { semantica = true; break; }
-      }
-      const valorExato = difVal <= 0.05;
-      if (!semantica && !valorExato) continue;
-      const score = difVal + difData * 5 + (semantica ? 0 : 8); // sem semântica pega leve penalidade
-      if (!melhor || score < melhor.score) melhor = { t, p, difVal, difData, score };
-    }
-      if (melhor) {
-        sugestoes.push({
-          transacao_id: t.id, lancamento_id: melhor.p.id,
-          transacao: melhor.t.descricao.slice(0, 30) + ' · ' + melhor.t.data + ' · ' + fmt2(melhor.t.valor),
-          previsto: melhor.p.descricao + ' ' + (melhor.p.parcela || '') + ' (venc ' + melhor.p.vencimento + ')',
-          previstoValorPrevisto: fmt2(melhor.p.valor),
-          transacaoValorReal: fmt2(melhor.t.valor),
-          difVal: +melhor.difVal.toFixed(2), difData: Math.round(melhor.difData),
-          fonte: 'regra', score: melhor.score
-        });
-        usadosTx.add(t.id); usadosLanc.add(melhor.p.id);
-      }
+    WHERE l.pago = 0 AND COALESCE(c.nome, '') != 'Cartões' AND l.vencimento <= date(?, '+${JANELA_ANTES} days')
+    ${mesId ? 'AND l.mes_id = ?' : ''} ORDER BY l.vencimento`).all(...(mesId ? [hoje, mesId] : [hoje]));
+  const txs = db.prepare(`SELECT id, data, valor, descricao, fonte FROM transacoes
+    WHERE natureza = 'gasto' AND valor < 0 AND data <= ? AND data >= date(?, '-60 days')
+    AND fonte NOT IN (${FONTES_CARTAO.map(() => '?').join(',')})
+    AND id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL AND pago = 1)
+    ORDER BY data DESC`).all(hoje, hoje, ...FONTES_CARTAO);
+  const recusado = db.prepare('SELECT 1 FROM conciliacoes_recusadas_par WHERE lancamento_id = ? AND transacao_id = ?');
+  const pares = [];
+  for (const l of lancs) for (const t of txs) {
+    const a = avaliarPar(l, t);
+    if (a && !recusado.get(l.id, t.id)) pares.push({ l, t, ...a });
   }
+  return { lancs, txs, pares };
+}
 
-  // vencidos sem pagamento
-  const hojeStr = new Date().toISOString().slice(0, 10);
-  const idsComSug = new Set(sugestoes.map(s => s.lancamento_id));
-  const vencidos_sem_pagamento = previstos
-    .filter(p => p.vencimento < hojeStr && !idsComSug.has(p.id))
-    .map(p => ({ lancamento_id: p.id, descricao: p.descricao, parcela: p.parcela, valor: p.valor, vencimento: p.vencimento }));
+// um para um, do par mais forte para o mais fraco
+function escolher(pares) {
+  const ordem = { certo: 0, sugerido: 1 };
+  const usL = new Set(), usT = new Set(), escolhidos = [];
+  for (const p of pares.slice().sort((a, b) => ordem[a.nivel] - ordem[b.nivel] || a.score - b.score)) {
+    if (usL.has(p.l.id) || usT.has(p.t.id)) continue;
+    usL.add(p.l.id); usT.add(p.t.id);
+    // ambíguo: outra transação igualmente forte para a mesma conta, ou outra conta para a mesma transação
+    const rivais = pares.filter(q => q !== p && q.nivel === p.nivel && (q.l.id === p.l.id || q.t.id === p.t.id) && Math.abs(q.score - p.score) < 1);
+    escolhidos.push({ ...p, ambiguo: rivais.length > 0 });
+  }
+  return escolhidos;
+}
 
-  // avulsos (sem match)
-  const idsTxUsados = new Set(sugestoes.map(s => s.transacao_id));
-  const avulsos = txs.filter(t => !idsTxUsados.has(t.id)).slice(0, 40);
+const fmt2 = v => 'R$ ' + Math.abs(v).toFixed(2);
 
+// sugestões do Reconciliar
+function conciliar() {
+  const { lancs, txs, pares } = paresCandidatos();
+  const escolhidos = escolher(pares);
+  const sugestoes = escolhidos.map(p => ({
+    transacao_id: p.t.id, lancamento_id: p.l.id,
+    transacao: p.t.descricao.slice(0, 30) + ' · ' + p.t.data + ' · ' + fmt2(p.t.valor),
+    previsto: p.l.descricao + ' ' + (p.l.parcela || '') + ' (venc ' + p.l.vencimento + ')',
+    previstoValorPrevisto: fmt2(p.l.valor),
+    transacaoValorReal: fmt2(p.t.valor),
+    difVal: p.difVal, difData: Math.abs(p.difData),
+    nivel: p.nivel, ambiguo: p.ambiguo,
+    fonte: p.identidade ? 'regra' : 'valor', score: r2(p.score)
+  }));
+  const hoje = hojeISO();
+  const comSug = new Set(sugestoes.map(s => s.lancamento_id));
+  const vencidos_sem_pagamento = lancs.filter(l => l.vencimento < hoje && !comSug.has(l.id))
+    .map(l => ({ lancamento_id: l.id, descricao: l.descricao, parcela: l.parcela, valor: l.valor, vencimento: l.vencimento }));
+  const txUsadas = new Set(sugestoes.map(s => s.transacao_id));
+  const avulsos = db.prepare(`SELECT * FROM transacoes WHERE id IN (${txs.map(t => t.id).join(',') || 0})
+    ORDER BY data DESC`).all().filter(t => !txUsadas.has(t.id)).slice(0, 40);
   return { sugestoes, vencidos_sem_pagamento, avulsos };
 }
 
@@ -157,9 +149,9 @@ function confirmar({ lancamento_id, transacao_id, recusar }) {
   if (!l) return { erro: 'lançamento não encontrado' };
 
   if (recusar) {
-    // recusou a sugestão: PERSISTE a recusa — nunca mais sugere esse par
+    // recusou a sugestão: vale só para ESTE par — a transação continua candidata a outras contas e no dia a dia
     if (transacao_id) {
-      db.prepare('INSERT OR IGNORE INTO conciliacoes_recusadas (transacao_id) VALUES (?)').run(transacao_id);
+      db.prepare('INSERT OR IGNORE INTO conciliacoes_recusadas_par (lancamento_id, transacao_id) VALUES (?, ?)').run(l.id, transacao_id);
     }
     return { ok: true, recusado: true };
   }
@@ -213,102 +205,38 @@ function confirmar({ lancamento_id, transacao_id, recusar }) {
   return { ok: true, aprendeu: !!t };
 }
 
-// Auto-conciliação automática de lançamentos usando padrão de busca e regras
+// Conciliação automática: a mesma regra, aplicando só o nível "certo" e sem ambiguidade
 function autoConciliarMes(mesRef) {
-  let refNorm = mesRef;
-  if (mesRef && /^\d{4}-\d{2}$/.test(mesRef)) {
-    const [y, m] = mesRef.split('-');
-    refNorm = `${m}-${y}`;
-  }
-  const mes = refNorm ? db.prepare('SELECT id, ref FROM meses WHERE ref=?').get(refNorm) : null;
-  if (mesRef && !mes) {
-    return { ok: true, conciliados: 0, detalhes: [] };
-  }
-  let sql = `
-    SELECT l.*, r.padrao_busca, m.ref mes_ref
-    FROM lancamentos l
-    JOIN meses m ON m.id = l.mes_id
-    LEFT JOIN recorrencias r ON r.id = l.recorrencia_id
-  `;
-  const params = [];
-  if (mes) {
-    sql += ' WHERE l.mes_id = ?';
-    params.push(mes.id);
-  }
-  sql += ' ORDER BY l.vencimento';
-  const lancs = db.prepare(sql).all(...params);
-
-  const updLanc = db.prepare(`
-    UPDATE lancamentos
-    SET pago = 1, pago_em = ?, transacao_id = ?, valor = ?
-    WHERE id = ?
-  `);
-
-  let conciliados = 0;
-  const usadosTx = new Set(
-    db.prepare('SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL').all()
-      .map(r => r.transacao_id)
-      .filter(id => !!db.prepare('SELECT id FROM transacoes WHERE id=?').get(id))
-  );
-  // transações que já PAGARAM uma conta: nunca re-conciliar em outra conta
-  for (const id of usadosTx) {
-    const pago = db.prepare('SELECT COUNT(*) n FROM lancamentos WHERE transacao_id=? AND pago=1').get(id).n;
-    if (pago > 0) continue;
-    usadosTx.delete(id); // vínculo órfão (conta excluída?) — pode reusar
-  }
-
+  let ref = mesRef;
+  if (ref && /^\d{4}-\d{2}$/.test(ref)) { const [y, m] = ref.split('-'); ref = `${m}-${y}`; }
+  const mes = ref ? db.prepare('SELECT id FROM meses WHERE ref = ?').get(ref) : null;
+  if (ref && !mes) return { ok: true, conciliados: 0, detalhes: [] };
+  const { pares } = paresCandidatos({ mesId: mes ? mes.id : null });
+  const upd = db.prepare('UPDATE lancamentos SET pago = 1, pago_em = ?, transacao_id = ?, valor = ? WHERE id = ? AND pago = 0');
   const detalhes = [];
-
-  for (const l of lancs) {
-    if (l.transacao_id && db.prepare('SELECT id FROM transacoes WHERE id=?').get(l.transacao_id)) {
-      continue;
-    }
-
-    const lVal = Math.abs(l.valor);
-    const termos = [];
-    if (l.padrao_busca) {
-      l.padrao_busca.split('|').forEach(t => termos.push(t.trim().toUpperCase()));
-    }
-    const palavras = l.descricao.toUpperCase().replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(w => w.length >= 4);
-    termos.push(...palavras);
-
-    const txs = db.prepare(`
-      SELECT id, data, valor, descricao FROM transacoes
-      WHERE natureza='gasto' AND valor < 0
-      AND data >= date(?, '-25 days') AND data <= date(?, '+25 days')
-      ORDER BY ABS(ABS(valor) - ?) ASC, data DESC
-    `).all(l.vencimento, l.vencimento, lVal);
-
-    for (const t of txs) {
-      if (usadosTx.has(t.id)) continue;
-      const tVal = Math.abs(t.valor);
-      const difVal = Math.abs(tVal - lVal);
-      const difDays = Math.abs((new Date(t.data) - new Date(l.vencimento)) / 86400000);
-      const tUpper = t.descricao.toUpperCase();
-
-      const matchTermo = termos.some(termo => termo && tUpper.includes(termo));
-      const conf = padraoConfirmado(t.descricao);
-      const matchConf = conf && conf.descricao_lancamento?.toLowerCase().slice(0, 8) === l.descricao.toLowerCase().slice(0, 8);
-
-      // Auto-conciliação autônoma exige confirmação semântica (padrao_busca, termo na descrição ou padrão confirmado)
-      if ((matchTermo || matchConf) && difVal <= Math.max(lVal * 0.15, 25)) {
-        usadosTx.add(t.id);
-        conciliados++;
-        updLanc.run(t.data, t.id, tVal, l.id);
-        detalhes.push({
-          lancamento_id: l.id,
-          descricao: l.descricao,
-          vencimento: l.vencimento,
-          transacao_id: t.id,
-          transacao_desc: t.descricao,
-          transacao_data: t.data,
-          valor: tVal
-        });
-        break;
-      }
-    }
+  for (const p of escolher(pares)) {
+    if (p.nivel !== 'certo' || p.ambiguo) continue;
+    upd.run(p.t.data, p.t.id, Math.abs(p.t.valor), p.l.id);
+    detalhes.push({ lancamento_id: p.l.id, descricao: p.l.descricao, vencimento: p.l.vencimento,
+      transacao_id: p.t.id, transacao_desc: p.t.descricao, transacao_data: p.t.data, valor: Math.abs(p.t.valor) });
   }
-  return { ok: true, conciliados, detalhes };
+  return { ok: true, conciliados: detalhes.length, detalhes };
 }
 
-module.exports = { conciliar, confirmar, padraoDe, padraoConfirmado, autoConciliarMes };
+// Contas em aberto do mês com os pagamentos possíveis de cada uma — a mesma regra das sugestões
+function contasDoMesComCandidatos(ref) {
+  const mes = db.prepare('SELECT id FROM meses WHERE ref = ?').get(ref);
+  if (!mes) return { ok: true, mes: ref, contas: [] };
+  const { lancs, pares } = paresCandidatos({ mesId: mes.id });
+  const abertas = db.prepare(`SELECT l.*, c.nome categoria_nome FROM lancamentos l LEFT JOIN categorias c ON c.id = l.categoria_id
+    WHERE l.mes_id = ? AND l.pago = 0 AND COALESCE(c.nome, '') != 'Cartões' ORDER BY l.vencimento`).all(mes.id);
+  const contas = abertas.map(l => ({
+    id: l.id, descricao: l.descricao, valor: Math.abs(l.valor), vencimento: l.vencimento,
+    parcela: l.parcela, recorrencia_id: l.recorrencia_id, categoria: l.categoria_nome,
+    candidatos: pares.filter(p => p.l.id === l.id).sort((a, b) => a.score - b.score).slice(0, 5)
+      .map(p => ({ id: p.t.id, data: p.t.data, descricao: p.t.descricao, valor: Math.abs(p.t.valor), fonte: p.t.fonte, nivel: p.nivel }))
+  }));
+  return { ok: true, mes: ref, contas, ainda_nao_vencem: abertas.length - lancs.filter(l => l.mes_id === mes.id).length };
+}
+
+module.exports = { conciliar, confirmar, padraoDe, padraoConfirmado, autoConciliarMes, avaliarPar, contasDoMesComCandidatos };

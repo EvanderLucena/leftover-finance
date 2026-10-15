@@ -28,7 +28,7 @@ button .ico-svg svg { width: 13px; height: 13px; }
 .spacer { flex: 1; }
 
 /* layout sidebar */
-.layout { display: grid; grid-template-columns: 230px 1fr; min-height: calc(100vh - 53px); }
+.layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: calc(100vh - 53px); }
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 16px 10px; position: sticky; top: 53px; height: calc(100vh - 53px); overflow-y: auto; }
 .nav-item { padding: 11px 14px; border-radius: 8px; color: var(--muted); cursor: pointer; display: flex; gap: 12px; align-items: center; margin-bottom: 2px; font-weight: 500; font-size: 15px; }
 .nav-item.active { background: var(--panel2); color: var(--txt); border-left: 2px solid var(--green); }
@@ -390,7 +390,7 @@ canvas.chart-proj { height: 340px !important; }
 .dlg-anexar-foot button { font-size: 11.5px; padding: 7px 12px; }
 
 /* ===== PROJEÇÃO — hero e camadas ===== */
-.proj-hero { display: grid; grid-template-columns: 1.15fr 2fr; gap: 14px; margin-bottom: 14px; }
+.proj-hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 2fr); gap: 14px; margin-bottom: 14px; }
 .ph-main { background: linear-gradient(135deg, rgba(0,214,143,.12), rgba(0,214,143,.03)); border: 1px solid rgba(0,214,143,.35); border-radius: 16px; padding: 20px 24px; display: flex; flex-direction: column; gap: 6px; }
 .ph-main .lbl { font-size: 11px; letter-spacing: 1.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
 .ph-main .num { font-family: 'IBM Plex Mono'; font-size: 38px; font-weight: 700; line-height: 1.1; }
@@ -399,7 +399,7 @@ canvas.chart-proj { height: 340px !important; }
 .ph-main .num.down { color: var(--red); }
 .ph-main .sub { font-size: 12px; }
 .ph-trajectory { font-size: 12px; color: var(--blue); background: rgba(77,171,255,.09); border: 1px solid rgba(77,171,255,.25); border-radius: 8px; padding: 6px 10px; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
-.ph-side { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ph-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .ph-box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
 .ph-box .lbl { font-size: 10px; letter-spacing: 1px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
 .ph-box .val { font-size: 20px; font-weight: 700; }
@@ -533,3 +533,7 @@ canvas { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale
 .vc-bar i { display: block; height: 100%; background: linear-gradient(90deg, #4dabff, #00d68f); border-radius: 6px; }
 @media (max-width: 1200px) { .vc-hero { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 650px) { .vc-hero { grid-template-columns: 1fr; } }
+
+/* atributo hidden sempre vence (abas fora do menu, seções escondidas) */
+[hidden] { display: none !important; }
+@media (max-width: 900px) { .proj-hero { grid-template-columns: minmax(0, 1fr); } }

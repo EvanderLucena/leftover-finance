@@ -35,7 +35,7 @@ function gerarInsights() {
   } catch (e) { /* silencioso */ }
 
   try {
-    const { calendarioDividas } = require('./parcelas-futuras');
+    const { dividas: calendarioDividas } = require('../core/comprometido');
     const c = calendarioDividas();
     const terminando = (c.emAndamento || []).filter(d => {
       const [tM, tY] = d.termina.split('/').map(Number);
@@ -106,14 +106,10 @@ function gerarFluxo(mesRef = null) {
   const mesIso = `${yY}-${mM}`;
 
   // 1. Renda líquida do mês (realizada se existir; senão estimada)
-  const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1').all();
-  const rendaEstimada = rendas.reduce((s, r) => s + (r.tipo === 'horas' ? (r.valor_hora || 0) * (r.horas_previstas || 168) : (r.valor_base || 0)), 0);
-  let rendaRealizada = 0;
-  try {
-    const { totalRendaRealizada } = require('./renda-realizada');
-    rendaRealizada = totalRendaRealizada(mesIso) || 0;
-  } catch (e) {}
-  const renda = Math.max(rendaEstimada, rendaRealizada) || 14986.17;
+  // renda por competência, do motor único (core/comprometido.js)
+  const rendaMes = require('../core/comprometido').rendaDoMes(mesIso);
+  const renda = rendaMes.total;
+  const rendaRealizada = rendaMes.itens.reduce((s, r) => s + r.realizada, 0);
 
   // 2. Compromisso do mês — FONTE ÚNICA (compromisso-mes.js)
   const c = compromissoMes(ref);
@@ -181,7 +177,7 @@ function gerarFluxo(mesRef = null) {
 
 // health score — usa módulo único de parcelas futuras (mesma fonte da projeção e calendário)
 function gerarHealth() {
-  const { calendarioDividas } = require('./parcelas-futuras');
+  const { dividas: calendarioDividas } = require('../core/comprometido');
   const fluxo = gerarFluxo();
   const renda = fluxo[0].valor;
   const sobraObj = fluxo[fluxo.length - 1];

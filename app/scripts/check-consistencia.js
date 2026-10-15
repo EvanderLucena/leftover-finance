@@ -38,9 +38,6 @@ function checarConsistencia(mesRef = null) {
   // ---- 1. Painel vs Projeção (mês 1) ----
   // A projeção não inclui gasto do dia a dia no compromisso (é sobra livre);
   // comparamos o COMPROMISSO puro (fixos+faturas+parcelas): tem que bater.
-  try {
-    const { obterFaturasAbertas } = require('./faturas-abertas');
-  } catch (e) {}
   // comprometido da projeção mês 1 = compromissoMes(ref).total — mesma função.
   // Guardamos o valor para o endpoint expor e a UI comparar historicamente.
   const projecaoMes1 = {
@@ -66,8 +63,7 @@ function checarConsistencia(mesRef = null) {
       const txs = db.prepare(`
         SELECT t.id, t.data, t.valor, t.descricao, t.fonte FROM transacoes t
         WHERE t.natureza='gasto' AND substr(t.data,1,7)=? AND t.parcela IS NULL
-          AND t.id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)
-          AND t.id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas)`).all(mesIso);
+          AND t.id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)`).all(mesIso);
       for (const l of abertos) {
         const cand = txs.find(t =>
           Math.abs(Math.abs(t.valor) - Math.abs(l.valor)) <= Math.max(Math.abs(l.valor) * 0.12, 15) &&
