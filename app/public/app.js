@@ -601,7 +601,8 @@ function renderizarAnalyticsVisual(resumo, rows) {
     const canvas = document.getElementById('ch-ext-meses');
     if (canvas && resumo?.timeline) {
       const tl = resumo.timeline || [];
-      const labels = tl.map(t => mesCurto(t.label));
+      // rótulo YYYY-MM-DD = barra por dia (período de um mês); YYYY-MM = barra por mês
+      const labels = tl.map(t => t.label.length === 10 ? t.label.slice(8, 10) + '/' + t.label.slice(5, 7) : mesCurto(t.label));
       if (window.Chart) {
         const existing = Chart.getChart(canvas);
         if (existing) existing.destroy();
@@ -911,18 +912,27 @@ function renderizarTabelaOuAgrupado() {
         }
         if (!grupos[chave]) grupos[chave] = { chave, n: 0, tot: 0, gastos: 0, entradas: 0, txs: [] };
         grupos[chave].n++;
-        grupos[chave].tot += t.valor;
+        // transferência entre contas, pagamento de fatura e oculta não são gasto nem entrada: ficam fora do total
+        const neutra = ['transferencia', 'transferencia-propria', 'ignorado'].includes(t.natureza);
+        if (!neutra) grupos[chave].tot += t.valor;
         if (t.valor < 0 && t.natureza === 'gasto') grupos[chave].gastos += Math.abs(t.valor);
-        if (t.valor > 0) grupos[chave].entradas += t.valor;
+        if (t.valor > 0 && !neutra) grupos[chave].entradas += t.valor;
         grupos[chave].txs.push(t);
       }
 
-      const ordenado = Object.values(grupos).sort((a, b) => Math.abs(b.tot) - Math.abs(a.tot));
+      // por dia: ordem de data (mais recente primeiro); categoria e estabelecimento: maior gasto primeiro
+      const ordenado = Object.values(grupos).sort(modo === 'dia'
+        ? (a, b) => b.chave.localeCompare(a.chave)
+        : (a, b) => b.gastos - a.gastos || Math.abs(b.tot) - Math.abs(a.tot));
+      const SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+      const rotulo = g => modo === 'dia'
+        ? `${SEMANA[new Date(g.chave + 'T12:00:00').getDay()]}, ${g.chave.slice(8, 10)}/${g.chave.slice(5, 7)}`
+        : g.chave;
       agrupado.innerHTML = ordenado.map(g => `
         <div style="background:var(--panel2); border-radius:8px; margin-bottom:10px; border:1px solid var(--line); overflow:hidden;">
           <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--line);">
             <div>
-              <b style="font-size:14px; color:var(--txt);">${g.chave}</b>
+              <b style="font-size:14px; color:var(--txt);">${rotulo(g)}</b>
               <span class="muted" style="font-size:12px; margin-left:8px;">(${g.n} transaç${g.n > 1 ? 'ões' : 'ão'})</span>
             </div>
             <div style="display:flex; gap:14px; align-items:center;">
@@ -932,7 +942,7 @@ function renderizarTabelaOuAgrupado() {
             </div>
           </div>
           <div style="padding:6px 14px;">
-            ${g.txs.slice(0, 10).map(t => {
+            ${g.txs.map(t => {
               const ehIgnorado = t.natureza === 'ignorado';
               const ehNeutro = ['transferencia', 'transferencia-propria', 'ignorado'].includes(t.natureza);
               const corVal = ehNeutro ? 'var(--muted)' : (t.valor < 0 ? 'var(--red)' : 'var(--green)');
@@ -948,7 +958,6 @@ function renderizarTabelaOuAgrupado() {
                 <span class="mono ${ehIgnorado ? 'valor-oculto' : ''}" style="width:90px; text-align:right; color:${corVal};" title="${ehIgnorado ? 'Desconsiderada dos cálculos' : ''}">${t.valor > 0 ? '+' : ''}${fmt(t.valor)}</span>
               </div>`;
             }).join('')}
-            ${g.txs.length > 10 ? `<div class="muted" style="font-size:11.5px; padding:6px 0; text-align:center;">+ ${g.txs.length - 10} outras transações...</div>` : ''}
           </div>
         </div>`).join('');
     }

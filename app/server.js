@@ -85,6 +85,9 @@ function clausulasPeriodo(query) {
       params.push(query.ate);
     }
   }
+  // só o que já aconteceu: parcela de cartão com data futura é agendamento (aparece na Projeção, não aqui)
+  sql += ' AND data <= ?';
+  params.push(require('./core/calendario').hojeISO());
   return { sql, params };
 }
 
@@ -725,17 +728,27 @@ app.get('/api/extratos/resumo', async (req, res) => {
       timelineParams.push('%' + busca + '%', '%' + busca + '%');
     }
 
-    const mesMaxIso = req.query.ate || new Date().toISOString().slice(0, 7);
-    timelineBaseSql += ' AND substr(data, 1, 7) <= ?';
-    timelineParams.push(mesMaxIso);
-
-    if (req.query.de && req.query.ate && req.query.de !== req.query.ate) {
-      timelineBaseSql += ' AND substr(data, 1, 7) >= ?';
-      timelineParams.push(req.query.de);
+    // período dentro de um mês só (ex.: "Mês atual"): barras por dia; período maior: barras por mês.
+    // Nunca passa de hoje: data futura de parcela é agendamento, não transação.
+    const hojeIso = calendario.hojeISO();
+    const porDia = !!(req.query.de && req.query.ate && req.query.de.slice(0, 7) === req.query.ate.slice(0, 7));
+    timelineBaseSql += ' AND data <= ?';
+    timelineParams.push(hojeIso);
+    if (porDia) {
+      timelineBaseSql += ' AND substr(data, 1, 7) = ?';
+      timelineParams.push(req.query.de.slice(0, 7));
+    } else {
+      const mesMaxIso = req.query.ate || hojeIso.slice(0, 7);
+      timelineBaseSql += ' AND substr(data, 1, 7) <= ?';
+      timelineParams.push(mesMaxIso.slice(0, 7));
+      if (req.query.de) {
+        timelineBaseSql += ' AND substr(data, 1, 7) >= ?';
+        timelineParams.push(req.query.de.slice(0, 7));
+      }
     }
 
     const timelineSql = `
-      SELECT substr(data, 1, 7) as mes,
+      SELECT ${porDia ? 'data' : 'substr(data, 1, 7)'} as mes,
              SUM(CASE WHEN valor < 0 AND natureza = 'gasto' THEN ABS(valor) ELSE 0 END) as gastos,
              SUM(CASE WHEN valor > 0 AND natureza IN ('entrada', 'salario', 'rendimento') THEN valor ELSE 0 END) as entradas
       ${timelineBaseSql}
@@ -747,15 +760,9 @@ app.get('/api/extratos/resumo', async (req, res) => {
       gastos: Math.round(m.gastos * 100) / 100,
       entradas: Math.round(m.entradas * 100) / 100
     }));
-    if (timeline.length > 12) {
+    if (!porDia && timeline.length > 12) {
       timeline = timeline.slice(-12);
     }
-
-    const { saldosAUVP } = require('./scripts/saldos');
-    const saldos = await saldosAUVP().catch(() => ({ saldos: [] }));
-    const todas = saldos.saldos || [];
-    const saldoDisponivel = todas.filter(s => s.tipo === 'BANK').reduce((s, c) => s + c.valor, 0);
-    const faturasAbertas = todas.filter(s => s.tipo === 'CREDIT' && s.valor < 0).reduce((s, c) => s + Math.abs(c.valor), 0);
 
     res.json({
       totais: {
@@ -770,14 +777,7 @@ app.get('/api/extratos/resumo', async (req, res) => {
       },
       top_categorias: topCategorias,
       top_estabelecimentos: topEstabelecimentos,
-      timeline,
-      saldos: {
-        quando: saldos.quando,
-        saldo_disponivel: Math.round(saldoDisponivel * 100) / 100,
-        faturas_abertas: Math.round(faturasAbertas * 100) / 100,
-        saldo_liquido: Math.round((saldoDisponivel - faturasAbertas) * 100) / 100,
-        contas: todas.map(c => ({ nome: c.nome, tipo: c.tipo, valor: c.valor, icone: c.icone }))
-      }
+      timeline
     });
   } catch (err) {
     res.status(500).json({ erro: err.message });
