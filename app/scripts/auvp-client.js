@@ -1,14 +1,18 @@
 // Fase 1 — Cliente MCP AUVP persistente (sessão, rate limit, retry)
 const db = require('../db');
+const segredo = require('../core/segredo');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let sessionId = null;
 
 function cfgAUVP() {
   const get = k => { const r = db.prepare('SELECT valor FROM config WHERE chave=?').get(k); return r ? r.valor : null; };
+  // a chave mora só no cofre (core/segredo.js); se ainda estiver no banco, muda para o cofre e sai do banco
+  const antiga = get('auvp_key');
+  if (antiga) { segredo.gravarChave(antiga); db.prepare("DELETE FROM config WHERE chave='auvp_key'").run(); }
   return {
     url: process.env.AUVP_URL || get('auvp_url'),
-    key: process.env.AUVP_KEY || get('auvp_key'),
+    key: process.env.AUVP_KEY || segredo.lerChave(),
     ativo: process.env.AUVP_ATIVO ? process.env.AUVP_ATIVO === '1' : get('auvp_ativo') === '1'
   };
 }

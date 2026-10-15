@@ -2,8 +2,8 @@
 // Analisa a saúde financeira real consolidada (faturas abertas, liquidez, projeção futura, descompressão de dívidas)
 const db = require('../db');
 const { getConfigIA } = require('./ia');
-const { obterFaturasAbertas } = require('./faturas-abertas');
-const { calendarioDividas } = require('./parcelas-futuras');
+// faturas e parcelamentos vêm do motor único
+const { faturasAbertas: obterFaturasAbertas, dividas: calendarioDividas } = require('../core/comprometido');
 
 function fmtMoeda(v) {
   return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

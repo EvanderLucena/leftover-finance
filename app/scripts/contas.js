@@ -12,6 +12,7 @@ function listarContas(apenasAtivas = false) {
     return {
       ...r,
       fontes,
+      perfil: (db.prepare('SELECT perfil_conferido FROM cartoes WHERE conta_local = ?').get(r.id) || {}).perfil_conferido === 0 ? 'aprendido' : 'conferido',
       configurado: r.tipo === 'BANK' || (r.dia_fechamento != null && r.dia_vencimento != null)
     };
   });
@@ -72,6 +73,13 @@ function salvarConta(id, dados) {
     SET nome = ?, dia_fechamento = ?, dia_vencimento = ?, cor = ?, icone = ?, ativo = ?
     WHERE id = ?
   `).run(nome, dia_fechamento, dia_vencimento, cor, icone, ativo, id);
+
+  // cartão: fechamento e vencimento informados aqui viram o perfil conferido usado pelo motor (core/comprometido.js);
+  // a sincronização deixa de reaprender esse cartão
+  if (conta.tipo === 'CREDIT' && (dados.dia_fechamento !== undefined || dados.dia_vencimento !== undefined) && dia_fechamento && dia_vencimento) {
+    db.prepare('UPDATE cartoes SET fecha_dia = ?, vence_dia = ?, perfil_conferido = 1, incluir = 1 WHERE conta_local = ?')
+      .run(dia_fechamento, dia_vencimento, id);
+  }
 
   return obterContaPorId(id);
 }

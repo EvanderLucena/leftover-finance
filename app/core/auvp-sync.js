@@ -1,0 +1,274 @@
+// Sincronização com a AUVP (fonte da verdade). Só leitura na AUVP.
+// - transações: importadas por id (sem janela de datas que perde lançamento atrasado), data em Brasília
+// - faturas fechadas e seus itens: total oficial, parcela k/N e data original
+// - depois: transações entram em `transacoes` (para Contas do mês e Reconciliar) e as faturas
+//   viram os lançamentos "Fatura X" dos meses existentes
+const fs = require('node:fs');
+const path = require('node:path');
+const db = require('../db');
+const { dataBrasilia, hojeISO } = require('./calendario');
+
+// ---------- chamadas de leitura à AUVP ----------
+async function chamarAUVP(tool, args) {
+  const cli = require('../scripts/auvp-client');
+  await cli.garantirSessao();
+  const { url, key } = cli.cfgAUVP();
+  if (!chamarAUVP.sessao) {
+    const r0 = await fetch(url, { method: 'POST', headers: { 'x-api-key': key, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'finflow', version: '2.0' } } }) });
+    chamarAUVP.sessao = r0.headers.get('mcp-session-id');
+    await r0.text();
+  }
+  await new Promise(r => setTimeout(r, 1100)); // limite de 60 chamadas/min
+  const headers = { 'x-api-key': key, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+  if (chamarAUVP.sessao) headers['mcp-session-id'] = chamarAUVP.sessao;
+  const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: tool, arguments: args } }) });
+  const t = await r.text();
+  const linhas = t.split('\n').filter(l => l.startsWith('data:'));
+  const j = linhas.length ? JSON.parse(linhas[0].slice(5)) : JSON.parse(t);
+  const txt = j.result && j.result.content && j.result.content[0] && j.result.content[0].text;
+  if (!txt) throw new Error(`AUVP ${tool}: resposta vazia`);
+  return JSON.parse(txt);
+}
+
+async function baixarTransacoes(de) {
+  const out = [];
+  for (let page = 1; page <= 40; page++) {
+    const r = await chamarAUVP('chamar_endpoint', { metodo: 'GET', caminho: '/transactions', query: { from: de, to: '2099-12-31', limit: 100, page } });
+    out.push(...(r.transactions || []));
+    if (!r.pagination || page >= r.pagination.totalPages) break;
+  }
+  return out;
+}
+
+async function baixarFaturas() {
+  const res = { listas: {}, itens: {} };
+  for (const c of db.prepare('SELECT * FROM cartoes WHERE conta_externa IS NOT NULL').all()) {
+    const lista = await chamarAUVP('listar_faturas', { contaExternaId: c.conta_externa });
+    res.listas[c.conta_id] = lista.faturas || [];
+    // itens das 3 faturas mais recentes (as antigas não mudam)
+    for (const f of (lista.faturas || []).slice().sort((a, b) => b.due_date.localeCompare(a.due_date)).slice(0, 3)) {
+      const it = await chamarAUVP('listar_faturas', { contaExternaId: c.conta_externa, faturaId: f.id });
+      res.itens[f.id] = it.transactions || [];
+    }
+  }
+  return res;
+}
+
+// ---------- cartões: descobertos na AUVP, perfil aprendido das faturas ----------
+// contas: [{ id, idExterno, nome }] dos cartões de crédito da AUVP
+function descobrirCartoes(contas) {
+  const local = db.prepare("SELECT id, nome FROM contas_bancarias WHERE tipo='CREDIT' AND LOWER(conta_auvp) = LOWER(?)");
+  const ins = db.prepare(`INSERT OR IGNORE INTO cartoes (conta_id, conta_externa, conta_local, nome, fecha_dia, vence_dia, incluir, perfil_conferido)
+    VALUES (?, ?, ?, ?, 0, 0, 0, 0)`);
+  const externa = db.prepare('UPDATE cartoes SET conta_externa = ? WHERE conta_id = ? AND conta_externa IS NULL');
+  for (const c of contas) {
+    if (c.id == null || !c.idExterno) continue;
+    const l = local.get(c.nome || '');
+    ins.run(c.id, c.idExterno, l ? l.id : null, l ? l.nome : (c.nome || 'Cartão ' + c.id));
+    externa.run(c.idExterno, c.id);
+  }
+}
+
+// Perfil de um cartão a partir das faturas fechadas (só para cartão que o usuário ainda não conferiu):
+// - vencimento: o dia mais comum dos vencimentos (fim de semana empurra para o dia útil seguinte);
+// - fechamento: a última compra à vista de uma fatura dá o mínimo; a primeira da fatura seguinte, no mesmo mês, dá o máximo;
+// - parcela futura: se as parcelas futuras que a AUVP já lista caem no dia do vencimento, o banco data pela fatura.
+function aprenderPerfis(hoje = hojeISO()) {
+  const dia = d => +d.slice(8, 10);
+  const faturas = db.prepare('SELECT id, vencimento FROM faturas WHERE conta_id = ? ORDER BY vencimento DESC LIMIT 12');
+  const compras = db.prepare(`SELECT MIN(COALESCE(data_original, data)) primeira, MAX(COALESCE(data_original, data)) ultima FROM fatura_itens
+    WHERE fatura_id = ? AND (parcela_n IS NULL OR parcela_n <= 1) AND valor < 0 AND ignorada = 0`);
+  const futuras = db.prepare('SELECT data, descricao FROM auvp_transacoes WHERE conta_id = ? AND data > ?');
+  const grava = db.prepare('UPDATE cartoes SET fecha_dia = ?, vence_dia = ?, parcela_futura = ?, incluir = ? WHERE conta_id = ?');
+  const aprendidos = [];
+  for (const c of db.prepare('SELECT * FROM cartoes WHERE perfil_conferido = 0').all()) {
+    const fs_ = faturas.all(c.conta_id).reverse();
+    if (!fs_.length) continue;
+    const contagem = {};
+    for (const f of fs_) contagem[dia(f.vencimento)] = (contagem[dia(f.vencimento)] || 0) + 1;
+    const vence = +Object.keys(contagem).sort((a, b) => contagem[b] - contagem[a] || a - b)[0];
+    let minimo = 0, maximo = 31;
+    const comp = fs_.map(f => compras.get(f.id)).map(r => (r && r.ultima ? r : null));
+    comp.forEach((r, i) => {
+      if (!r) return;
+      minimo = Math.max(minimo, dia(r.ultima));
+      const prox = comp[i + 1];
+      if (prox && prox.primeira.slice(0, 7) === r.ultima.slice(0, 7)) maximo = Math.min(maximo, dia(prox.primeira) - 1);
+    });
+    const fecha = minimo === 0 ? 0 : (maximo >= minimo && maximo < 31 ? maximo : minimo);
+    const parcelas = futuras.all(c.conta_id, hoje).filter(t => parcelaDaDescricao(t.descricao));
+    const noVencimento = parcelas.filter(t => dia(t.data) >= vence && dia(t.data) <= vence + 3).length;
+    const parcelaFutura = parcelas.length >= 3 && noVencimento / parcelas.length >= 0.7 ? 'vencimento' : 'ciclo';
+    grava.run(fecha, vence, parcelaFutura, fecha && vence ? 1 : 0, c.conta_id);
+    // a tela Configurar mostra o mesmo perfil; editar lá vira o perfil conferido (scripts/contas.js)
+    if (c.conta_local && fecha && vence) db.prepare('UPDATE contas_bancarias SET dia_fechamento = ?, dia_vencimento = ? WHERE id = ?').run(fecha, vence, c.conta_local);
+    aprendidos.push({ cartao: c.nome, fecha_dia: fecha, vence_dia: vence, parcela_futura: parcelaFutura });
+  }
+  return aprendidos;
+}
+
+// ---------- gravação ----------
+function gravarTransacoes(txs) {
+  const up = db.prepare(`INSERT INTO auvp_transacoes (id, conta_id, data, data_hora, valor, descricao, tipo, ignorada, interna, par_id, mes_referencia, bruto, atualizado_em)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET conta_id=excluded.conta_id, data=excluded.data, data_hora=excluded.data_hora, valor=excluded.valor,
+      descricao=excluded.descricao, tipo=excluded.tipo, ignorada=excluded.ignorada, interna=excluded.interna, par_id=excluded.par_id,
+      mes_referencia=excluded.mes_referencia, bruto=excluded.bruto, atualizado_em=datetime('now')`);
+  db.exec('BEGIN');
+  try {
+    for (const t of txs) {
+      const conta = t.accountId ?? t.user_account_id;
+      if (conta == null || t.id == null) continue;
+      up.run(t.id, conta, dataBrasilia(t.date), t.date, Number(t.amount), t.display_description || t.description || '', t.type,
+        t.ignore ? 1 : 0, t.is_internal_transfer ? 1 : 0, t.transfer_pair_id != null ? String(t.transfer_pair_id) : null,
+        (t.reference_month || '').slice(0, 7) || null, JSON.stringify(t));
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+function gravarFaturas({ listas, itens }) {
+  const upF = db.prepare(`INSERT INTO faturas (id, conta_id, vencimento, total, minimo, atualizado_em) VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET vencimento=excluded.vencimento, total=excluded.total, minimo=excluded.minimo, atualizado_em=datetime('now')`);
+  const delI = db.prepare('DELETE FROM fatura_itens WHERE fatura_id=?');
+  const insI = db.prepare(`INSERT OR REPLACE INTO fatura_itens (fatura_id, transacao_id, data, descricao, valor, tipo, parcela_n, parcela_total, data_original, ignorada)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  db.exec('BEGIN');
+  try {
+    for (const [conta, lista] of Object.entries(listas)) {
+      for (const f of lista) upF.run(f.id, Number(conta), f.due_date.slice(0, 10), Number(f.total_amount), f.minimum_payment_amount != null ? Number(f.minimum_payment_amount) : null);
+    }
+    for (const [faturaId, its] of Object.entries(itens)) {
+      delI.run(faturaId);
+      for (const i of its) {
+        const c = i.transaction_credit_data || {};
+        insI.run(faturaId, i.id, dataBrasilia(i.date), i.display_description || i.description || '', Number(i.amount), i.type,
+          c.current_installment ?? null, c.installments ?? null, c.original_date ? dataBrasilia(c.original_date) : null, i.ignore ? 1 : 0);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+// ---------- transações da AUVP -> tabela `transacoes` (Contas do mês e Reconciliar) ----------
+const parcelaDaDescricao = d => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\s*$/); return m && +m[1] >= 1 && +m[1] <= +m[2] ? `${+m[1]}/${+m[2]}` : null; };
+
+// Transações da AUVP que já estão no banco vindas dos PDFs (extratos e faturas importados antes da AUVP).
+// Casamento um para um: mesma origem (conta ou cartão), mesmo valor, até 3 dias de diferença,
+// e só dentro do período que o PDF daquela origem cobre.
+function fontePdfDaConta(nome, cartao) {
+  const n = String(nome || '').toLowerCase();
+  if (/ita[uú]/.test(n)) return cartao ? 'itau-fatura' : 'itau-conta';
+  if (/mercado ?pago/.test(n)) return 'mercadopago';
+  if (/^nu |nubank|^gold$/.test(n)) return 'nubank';
+  return null;
+}
+function transacoesJaImportadasDePdf(contas) {
+  const cobertura = new Map(db.prepare(`SELECT fonte, MAX(data) ate FROM transacoes
+    WHERE fonte IN ('itau-conta', 'itau-fatura', 'mercadopago', 'nubank') GROUP BY fonte`).all().map(r => [r.fonte, r.ate]));
+  const candidatos = db.prepare(`SELECT id, data FROM transacoes WHERE fonte = ? AND ABS(valor - ?) < 0.01
+    AND data BETWEEN date(?, '-3 days') AND date(?, '+3 days') ORDER BY ABS(julianday(data) - julianday(?)), id`);
+  const usados = new Set();
+  const cobertas = new Set();
+  const auvp = db.prepare('SELECT id, conta_id, data, valor FROM auvp_transacoes ORDER BY data, id').all();
+  // 1ª passada: mesma data; 2ª: até 3 dias (assim um PIX do dia 19 não toma o par de uma transferência do dia 20)
+  for (const folga of [0, 3]) for (const t of auvp) {
+    if (cobertas.has(t.id)) continue;
+    const c = contas.get(t.conta_id) || {};
+    const fonte = fontePdfDaConta(c.nome, c.cartao);
+    if (!fonte || !cobertura.has(fonte) || t.data > cobertura.get(fonte)) continue;
+    const par = candidatos.all(fonte, t.valor, t.data, t.data, t.data).find(r => !usados.has(r.id) && Math.abs(Date.parse(r.data) - Date.parse(t.data)) <= folga * 864e5);
+    if (par) { usados.add(par.id); cobertas.add(t.id); }
+  }
+  return cobertas;
+}
+
+function importarParaTransacoes(hoje = hojeISO()) {
+  const contas = new Map();
+  try {
+    for (const r of db.prepare("SELECT DISTINCT json_extract(bruto,'$.accountId') id, json_extract(bruto,'$.user_account.name') nome, json_extract(bruto,'$.user_account.subtype') sub FROM auvp_transacoes").all())
+      contas.set(r.id, { nome: r.nome, cartao: r.sub === 'CREDIT_CARD' });
+  } catch (e) { /* sem json1 */ }
+  const cartaoIds = new Set(db.prepare('SELECT conta_id FROM cartoes').all().map(r => r.conta_id));
+  const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1 AND padrao_regex IS NOT NULL').all();
+  const { aplicarRegras } = require('../scripts/motor-regras');
+  const existe = db.prepare('SELECT 1 FROM transacoes WHERE hash_unico IN (?, ?, ?)');
+  const creditoManual = db.prepare(`SELECT 1 FROM transacoes WHERE fonte='manual' AND ABS(valor-?)<0.01 AND data BETWEEN date(?, '-3 days') AND date(?, '+3 days')`);
+  const ins = db.prepare(`INSERT OR IGNORE INTO transacoes (data, valor, descricao, fonte, natureza, categoria, parcela, conta, hash_unico, observacao)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const jaNoPdf = transacoesJaImportadasDePdf(contas);
+  // cópia importada antes desta regra existir: sai, desde que nada aponte para ela
+  const removerCopia = db.prepare(`DELETE FROM transacoes WHERE hash_unico IN (?, ?)
+    AND id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)
+    AND id NOT IN (SELECT transacao_id FROM rendas_realizadas WHERE transacao_id IS NOT NULL)
+    AND id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas WHERE transacao_id IS NOT NULL)
+    AND id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas_par WHERE transacao_id IS NOT NULL)`);
+  let novas = 0;
+  db.exec('BEGIN');
+  try {
+    for (const t of db.prepare('SELECT * FROM auvp_transacoes WHERE data <= ? ORDER BY data').all(hoje)) {
+      if (jaNoPdf.has(t.id)) { removerCopia.run('auvp-' + t.id, 'auvp-pos-' + t.id); continue; } // já veio de PDF, antes da AUVP
+      if (existe.get('auvp-' + t.id, 'auvp-pos-' + t.id, 'auvp-neg-' + t.id)) continue;
+      if (t.valor > 0 && creditoManual.get(t.valor, t.data, t.data)) continue; // renda já lançada à mão
+      const ehCartao = cartaoIds.has(t.conta_id) || (contas.get(t.conta_id) || {}).cartao;
+      let natureza, categoria = null;
+      if (t.interna) natureza = 'transferencia-propria';
+      else if (t.ignorada) natureza = 'ignorado';
+      else if (t.valor > 0) natureza = rendas.some(r => new RegExp(r.padrao_regex, 'i').test(t.descricao)) ? 'salario' : 'entrada';
+      else {
+        const [r] = aplicarRegras([{ descricao: t.descricao, valor: t.valor }]);
+        natureza = r.natureza || 'gasto';
+        categoria = r.categoria || null;
+      }
+      const hash = (t.valor > 0 ? 'auvp-pos-' : 'auvp-') + t.id;
+      const r = ins.run(t.data, t.valor, t.descricao, ehCartao ? 'auvp-mcp' : 'auvp-bank', natureza, categoria,
+        ehCartao ? parcelaDaDescricao(t.descricao) : null, (contas.get(t.conta_id) || {}).nome || null, hash, null);
+      if (r.changes) novas++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return novas;
+}
+
+// ---------- pós-processamento comum (API ou retrato) ----------
+function posSincronizacao(hoje) {
+  const novas = importarParaTransacoes(hoje);
+  const { atualizarLancamentosDeFatura } = require('./comprometido');
+  const faturas = atualizarLancamentosDeFatura(hoje);
+  return { transacoes_novas: novas, lancamentos_de_fatura: faturas };
+}
+
+async function sincronizarAUVP({ diasAtras = 60, hoje = hojeISO() } = {}) {
+  const de = new Date(Date.parse(hoje + 'T12:00:00Z') - diasAtras * 864e5).toISOString().slice(0, 10);
+  const txs = await baixarTransacoes(de);
+  gravarTransacoes(txs);
+  const { contas } = await require('../scripts/auvp-client').pullContas(true);
+  descobrirCartoes((contas || []).filter(c => c.subtipo === 'CREDIT_CARD' || c.tipo === 'CREDIT'));
+  gravarFaturas(await baixarFaturas());
+  return { transacoes_auvp: txs.length, perfis_aprendidos: aprenderPerfis(hoje), ...posSincronizacao(hoje) };
+}
+
+// mesmo fluxo a partir de um retrato salvo em disco (testes): txall.json, faturas_*.json, fatura_<cartao>_<venc>.json
+function importarRetrato(dir, hoje = hojeISO()) {
+  const ler = f => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+  gravarTransacoes(ler('txall.json'));
+  const listas = {}, itens = {};
+  const arquivosDeFaturas = fs.readdirSync(dir).filter(f => /^faturas_.+\.json$/.test(f)).map(ler);
+  descobrirCartoes(arquivosDeFaturas.filter(j => j.faturas && j.faturas.length).map(j => ({
+    id: j.faturas[0].user_account_id, idExterno: j.contaExternaId, nome: (j.faturas[0].user_account || {}).name })));
+  for (const j of arquivosDeFaturas) {
+    const c = db.prepare('SELECT conta_id FROM cartoes WHERE conta_externa=?').get(j.contaExternaId);
+    if (c) listas[c.conta_id] = j.faturas || [];
+  }
+  for (const f of fs.readdirSync(dir).filter(f => /^fatura_.+_\d{4}-\d{2}-\d{2}\.json$/.test(f))) {
+    const its = ler(f).transactions || [];
+    const comFatura = its.find(i => i.bill_id);
+    if (comFatura) itens[comFatura.bill_id] = its;
+  }
+  gravarFaturas({ listas, itens });
+  aprenderPerfis(hoje);
+  return posSincronizacao(hoje);
+}
+
+module.exports = { sincronizarAUVP, descobrirCartoes, aprenderPerfis, fontePdfDaConta, importarRetrato, importarParaTransacoes, gravarTransacoes, gravarFaturas };

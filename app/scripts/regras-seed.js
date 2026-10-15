@@ -58,46 +58,11 @@ function seedRegras() {
   console.log('Regras criadas:', REGRAS.length);
 }
 
-function recategorizar() {
-  const regras = db.prepare('SELECT * FROM regras WHERE ativa=1 ORDER BY prioridade ASC').all();
-  const txs = db.prepare('SELECT id, descricao, valor, natureza FROM transacoes').all();
-  const upd = db.prepare('UPDATE transacoes SET natureza=?, categoria=COALESCE(categoria, ?), tags=COALESCE(tags, ?) WHERE id=?');
-  let mudou = 0;
-  for (const t of txs) {
-    // Se a transação já foi marcada como 'ignorado', preserva e não sobrescreve
-    let natureza = (t.natureza === 'ignorado') ? 'ignorado' : null;
-    let categoria = null, tags = null;
-    for (const r of regras) {
-      if (new RegExp(r.padrao, 'i').test(t.descricao)) {
-        if (t.natureza !== 'ignorado') {
-          natureza = r.natureza || natureza;
-        }
-        categoria = categoria || r.categoria;
-        tags = tags || r.tags;
-        break;
-      }
-    }
-    if (!natureza) {
-      // Se a transação já tinha uma natureza especial, preserva
-      if (t.natureza && ['transferencia', 'transferencia-propria', 'rendimento', 'salario', 'ignorado'].includes(t.natureza)) {
-        natureza = t.natureza;
-      } else if (t.valor > 0) {
-        natureza = 'entrada';
-      } else if (/pagamento.*fatura/i.test(t.descricao)) {
-        natureza = 'transferencia';
-      } else {
-        natureza = 'gasto';
-      }
-    }
-    upd.run(natureza, categoria, tags, t.id);
-    mudou++;
-  }
-  console.log('Transações classificadas:', mudou);
-}
+// a recategorização global foi removida em 15/10/2026: ela reescrevia a natureza de todas as transações,
+// inclusive as que vieram classificadas pela AUVP. Cada transação é classificada uma vez, quando entra (motor-regras.js).
 
 if (require.main === module) {
   seedRegras();
-  recategorizar();
 }
 
-module.exports = { seedRegras, recategorizar };
+module.exports = { seedRegras };

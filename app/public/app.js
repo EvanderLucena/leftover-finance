@@ -1260,14 +1260,15 @@ async function loadProjecao() {
 
     heroEl.innerHTML = `
       <div class="ph-main">
-        <span class="lbl">COMPROMETIMENTO DE ${mesCurto(m1.mes).toUpperCase()}</span>
+        <span class="lbl">COMPROMETIDO ATÉ HOJE · ${mesCurto(m1.mes).toUpperCase()}</span>
         <span class="num ${m1.sobra_livre > 0 ? 'up' : 'down'}">${fmt(m1.comprometido)}<small> (${pctComprometidoM1}% da renda)</small></span>
         <div class="ph-barra"><i style="width:${Math.min(100, Math.max(0, pctComprometidoM1))}%"></i></div>
         <span class="sub muted">
-          Fixos: ${fmt(m1.fixos || p.fixos_mensais)} · ${rotuloCartaoM1} · Externas: ${fmt(m1.parcelas_externas || 0)} · Sobra livre: <b class="up">${fmt(m1.sobra_livre)}</b>
+          Faturas: ${fmt(m1.parcelas_cartao || 0)} · Fixos: ${fmt(m1.fixos || 0)} · Parcelados: ${fmt(m1.parcelas_externas || 0)}${m1.dia_a_dia ? ' · Dia a dia já gasto: ' + fmt(m1.dia_a_dia) : ''} · Renda: ${fmt(m1.renda)} · Sobra livre: <b class="up">${fmt(m1.sobra_livre)}</b>
         </span>
         <div class="ph-trajectory">
-          <span>📉 Trajetória: comprometimento cai de <b>${pctComprometidoM1}%</b> (${mesCurto(m1.mes)}) para <b>${pctComprometidoM12}%</b> (${mesCurto(m12.mes)}) em 12 meses</span>
+          <span>Só o que já foi gasto ou está agendado: o comprometido até hoje cai de <b>${pctComprometidoM1}%</b> (${mesCurto(m1.mes)}) para <b>${pctComprometidoM12}%</b> (${mesCurto(m12.mes)}) conforme as parcelas terminam. Compras novas entram quando acontecerem.</span>
+          <span style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;"><button class="ghost" id="proj-btn-auvp">🔄 Atualizar da AUVP</button><button class="ghost" onclick="abrirModalFaturasAbertas()">💳 Conferir faturas com o app</button></span>
         </div>
       </div>
       <div class="ph-side">
@@ -1325,8 +1326,8 @@ async function loadProjecao() {
       const noPeriodo = (i >= idxInicio && i < idxInicio + n);
       const extra = noPeriodo ? pMensal : 0;
       const novoComprometido = s.comprometido + extra;
-      const novaSobra = p.renda_projetada - novoComprometido;
-      const novoPct = Math.round((novoComprometido / p.renda_projetada) * 100);
+      const novaSobra = s.renda - novoComprometido;
+      const novoPct = Math.round((novoComprometido / s.renda) * 100);
       if (noPeriodo) {
         mesesImpactados.push({ mes: s.mes, novoComprometido, novaSobra, novoPct, extra });
       }
@@ -1395,15 +1396,25 @@ async function loadProjecao() {
   if (inParc) inParc.onchange = () => { if (inVal?.value) executarSimulacao(); };
   if (simInicioSel) simInicioSel.onchange = () => { if (inVal?.value) executarSimulacao(); };
 
-  // camadas explicadas — DECISÃO 28/09/2026: série considera SÓ comprometido real;
-  // médias móveis são exibidas como referência, fora da soma (não são compromisso mensal)
+  // camadas — regra de 15/10/2026: só comprometimento real (gasto ou agendado), nenhuma média ou previsão
+  const fatM1 = (m1.faturas || []).map(f => `${f.cartao} ${fmt(f.total)}${f.status === 'fechada' ? ' (oficial)' : ' (até hoje)'}`).join(' · ');
   document.getElementById('proj-camadas').innerHTML = `
-    <div class="camadas-row"><span class="dot" style="background:#4dabff"></span><b>Fixos</b> ${fmt(p.fixos_mensais)}<span class="muted">— contas recorrentes mensais (aluguel, internet, saúde...)</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#ff4d5e"></span><b>Cartões de crédito</b> <span class="muted">— faturas do mês (${mesCurto(m1.mes)}: ${fmt(m1.parcelas_cartao)}), faturas abertas e parcelas nos meses seguintes</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#f28b5b"></span><b>Parcelas externas</b> ${fmt(p.parcelas_externas_mensal)}<span class="muted">— parcelamentos avulsos fora do cartão (Airbnb, IPTU Mãe, Leão IRPF...)</span></div>
-    <div class="camadas-row" style="opacity:.55;"><span class="dot" style="background:#ffa500"></span><b>Cartão à vista (ref. média 4m)</b> ${fmt(p.gasto_cartao_avista)}<span class="muted">— apenas referência; não é compromisso, não soma na sobra</span></div>
-    <div class="camadas-row" style="opacity:.55;"><span class="dot" style="background:#9d7aff"></span><b>PIX/débito variável (ref. média 4m)</b> ${fmt(p.gasto_pix_variavel)}<span class="muted">— apenas referência; gasto real do dia a dia fica na Sobra livre</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#00d68f"></span><b>Sobra livre</b> ${fmt(m1.sobra_livre)}<span class="muted">— renda − comprometido real; os gastos do dia a dia saem daqui</span></div>`;
+    <div class="camadas-row"><span class="dot" style="background:#ff4d5e"></span><b>Faturas de cartão</b> ${fmt(m1.parcelas_cartao)}<span class="muted">— fechada = total oficial da AUVP; aberta = compras já lançadas + parcelas programadas (o mesmo valor do app do banco). ${fatM1}</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#4dabff"></span><b>Contas fixas</b> ${fmt(m1.fixos)}<span class="muted">— ${m1.origem_contas === 'contas do mês' ? 'contas do mês' : 'recorrências'}; conta de valor variável ainda não chegada entra com o último valor pago</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#f28b5b"></span><b>Parcelados</b> ${fmt(m1.parcelas_externas)}<span class="muted">— parcelamentos fora do cartão, calculados pela data da 1ª parcela</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#b388ff"></span><b>Dia a dia já gasto</b> ${fmt(m1.dia_a_dia || 0)}<span class="muted">— só no mês atual: PIX e débito que saíram sem pagar nenhuma conta</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#00d68f"></span><b>Renda do mês</b> ${fmt(m1.renda)}<span class="muted">— por competência: renda que cai no fim do mês pode contar para o mês seguinte (configurável em cada renda); o que já caiu vale o valor real</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#00d68f"></span><b>Sobra livre</b> ${fmt(m1.sobra_livre)}<span class="muted">— renda − comprometido; nada aqui é previsão</span></div>`;
+  const _btnAuvp = document.getElementById('proj-btn-auvp');
+  if (_btnAuvp) _btnAuvp.onclick = async () => {
+    _btnAuvp.disabled = true;
+    _btnAuvp.textContent = 'Atualizando…';
+    try {
+      const r = await api('/api/auvp/sync', { method: 'POST' });
+      toast(r.nucleo && r.nucleo.erro ? 'AUVP: ' + r.nucleo.erro : 'Dados da AUVP atualizados');
+    } catch (e) { toast('Erro ao atualizar: ' + e.message); }
+    loadProjecao();
+  };
 
   const _ticker = document.getElementById('proj-ticker');
   if (_ticker) _ticker.innerHTML = '';
@@ -1414,8 +1425,9 @@ async function loadProjecao() {
   // legenda HTML custom
   const LEGENDA = [
     { cor: '#4dabff', label: 'Fixos' },
-    { cor: '#ff4d5e', label: 'Parcelas de cartão' },
-    { cor: '#f28b5b', label: 'Parcelas externas' },
+    { cor: '#ff4d5e', label: 'Faturas de cartão' },
+    { cor: '#f28b5b', label: 'Parcelados' },
+    { cor: '#b388ff', label: 'Dia a dia já gasto' },
     { cor: 'rgba(0,214,143,.6)', label: 'Sobra livre' }
   ];
   document.getElementById('proj-legend').innerHTML = LEGENDA.map(l =>
@@ -1428,10 +1440,11 @@ async function loadProjecao() {
       labels: serieV2.map(s => mesCurto(s.mes)),
       datasets: [
         { label: 'Fixos', data: serieV2.map(s => s.fixos), backgroundColor: '#4dabff', stack: 'a' },
-        { label: 'Parcelas de cartão', data: serieV2.map(s => s.parcelas_cartao), backgroundColor: '#ff4d5e', stack: 'a' },
-        { label: 'Parcelas externas', data: serieV2.map(s => s.parcelas_externas), backgroundColor: '#f28b5b', stack: 'a' },
+        { label: 'Faturas de cartão', data: serieV2.map(s => s.parcelas_cartao), backgroundColor: '#ff4d5e', stack: 'a' },
+        { label: 'Parcelados', data: serieV2.map(s => s.parcelas_externas), backgroundColor: '#f28b5b', stack: 'a' },
+        { label: 'Dia a dia já gasto', data: serieV2.map(s => s.dia_a_dia || 0), backgroundColor: '#b388ff', stack: 'a' },
         { label: 'Sobra livre', data: serieV2.map(s => Math.max(0, s.sobra_livre)), backgroundColor: 'rgba(0,214,143,.35)', stack: 'a' },
-        { label: 'Renda', type: 'line', data: serieV2.map(() => p.renda_projetada), borderColor: '#00d68f', borderDash: [6, 4], pointRadius: 0, order: 0 }
+        { label: 'Renda', type: 'line', data: serieV2.map(s => s.renda), borderColor: '#00d68f', borderDash: [6, 4], pointRadius: 0, order: 0 }
       ]
     },
     options: {
@@ -2002,7 +2015,6 @@ window.cancelarCompra = async function (id) {
   toast(`Compra cancelada: ${r.parcelas_canceladas} parcelas fora da projeção, ${r.transacoes_ignoradas} evidência(s) arquivada(s)`);
   document.getElementById('dlg-compra').close();
   loadCompras();
-  await api('/api/projecao?recalcular=1').catch(() => {});
 };
 
 window.reverterCancelamentoCompra = async function (id) {
@@ -2012,7 +2024,6 @@ window.reverterCancelamentoCompra = async function (id) {
   toast('Cancelamento revertido');
   document.getElementById('dlg-compra').close();
   loadCompras();
-  await api('/api/projecao?recalcular=1').catch(() => {});
 };
 document.getElementById('comp-busca').oninput = e => { clearTimeout(window._compT); window._compT = setTimeout(loadCompras, 300); };
 document.getElementById('comp-status').onchange = loadCompras;
@@ -2022,12 +2033,6 @@ async function loadImportar() {
   const hist = await api('/api/importacoes/historico').catch(() => []);
   document.getElementById('imp-hist').innerHTML = hist.slice(0, 14).map(h =>
     `<tr><td class="muted">${(h.data_importacao || '').slice(0, 16)}</td><td>${(h.arquivo || '').slice(0, 50)}</td><td>${h.tipo}</td><td>${h.linhas}</td></tr>`).join('');
-  // padrões aprendidos
-  const padroes = await api('/api/conciliar/padroes').catch(() => []);
-  document.getElementById('conc-padroes').innerHTML = padroes.length ? padroes.map(p =>
-    `<tr><td class="mono">${p.padrao_transacao}</td><td><b>${p.descricao_lancamento}</b></td><td class="muted">${p.confirmacoes}x</td></tr>`).join('')
-    : '<tr><td colspan="3" class="muted">Nenhum padrão ainda — aprove conciliações pra ensinar o sistema</td></tr>';
-  await carregarConciliacao();
 }
 
 // painel de conciliação
@@ -2042,6 +2047,7 @@ async function carregarConciliacao() {
         <div class="txt" style="flex:1;">
           <b>${s.transacao}</b>
           <span>→ corresponde a <b>${s.previsto}</b>${s.difVal > 0.01 ? ` · <span style="color:var(--amber)">atualiza a conta pro valor pago: ${s.previstoValorPrevisto} → ${s.transacaoValorReal}</span>` : ''}${s.difData ? ` · dif data ${s.difData}d` : ''}</span>
+          <span class="muted">${s.fonte === 'valor' ? 'Só o valor bate: nada na descrição identifica esta conta' : 'Identificada pela descrição'}${s.ambiguo ? ' · há outra opção igualmente provável, por isso não foi marcada sozinha' : ''}</span>
         </div>
         <button class="cta" onclick="concAprovar(${s.transacao_id}, ${s.lancamento_id})">${ico('check')} Confirmar</button>
         <button class="ghost" onclick="concRecusar(${s.transacao_id}, ${s.lancamento_id})">${ico('x')} Não é</button>
@@ -2068,106 +2074,40 @@ window.concAprovar = async function (txId, lancId) {
   carregarConciliacao();
 };
 window.concRecusar = async function (txId, lancId) {
-  await api('/api/conciliar/confirmar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lancamento_id: lancId, recusar: true }) });
-  toast('Recusado — não vou perguntar de novo por essa');
+  await api('/api/conciliar/confirmar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lancamento_id: lancId, transacao_id: txId, recusar: true }) });
+  toast('Recusado — essa transação não será mais sugerida para esta conta');
   carregarConciliacao();
 };
 window.concPagoFora = function (lancId) { return concPagoOutro(lancId); };
 
-// ---------- Reconciliação multi-fonte (AUVP ↔ PDFs) — aba própria ----------
-let recPrevia = null;
-let recAbaAtiva = 'novos';
-let recFiltroConta = null;
-
+// ---------- Reconciliar: sincroniza com a AUVP, sugere pela regra única e liga contas a pagamentos ----------
 function loadReconciliar() {
-  document.getElementById('rec-previa-btn').onclick = () => analiseReconciliacao(false);
-
-  // Botão direto de sincronizar com AUVP (força refresh na rede)
-  const btnSyncAuvp = document.getElementById('rec-btn-sync-auvp');
-  if (btnSyncAuvp) {
-    btnSyncAuvp.onclick = async () => {
-      btnSyncAuvp.disabled = true;
-      btnSyncAuvp.innerHTML = '<span>⏳ Sincronizando com AUVP...</span>';
-      try {
-        const r = await api('/api/auvp/sync', { method: 'POST' });
-        if (r.erro) toast('Erro ao sincronizar AUVP: ' + r.erro);
-        else toast('AUVP sincronizada com sucesso!');
-        await analiseReconciliacao(true);
-      } catch (e) {
-        toast('Erro de sincronização: ' + e.message);
-      } finally {
-        btnSyncAuvp.disabled = false;
-        btnSyncAuvp.innerHTML = '<span>🔄 Puxar dados da AUVP</span>';
-      }
-    };
-  }
-
-  // Atalhos rápidos de período
-  const setPeriodo = (dInicio, dFim, btnEl) => {
-    document.querySelectorAll('.rec-chip-periodo').forEach(b => b.classList.remove('on'));
-    if (btnEl) btnEl.classList.add('on');
-    document.getElementById('rec-de').value = dInicio.toISOString().slice(0, 10);
-    document.getElementById('rec-ate').value = dFim.toISOString().slice(0, 10);
-    analiseReconciliacao();
+  const btn = document.getElementById('rec-btn-sync-auvp');
+  if (btn) btn.onclick = async () => {
+    const status = document.getElementById('rec-sync-status');
+    btn.disabled = true;
+    btn.textContent = 'Atualizando…';
+    try {
+      const r = await api('/api/auvp/sync', { method: 'POST' });
+      const n = r.nucleo || {};
+      status.textContent = n.erro ? 'AUVP: ' + n.erro
+        : `${n.transacoes_novas || 0} transação(ões) nova(s) · ${(r.auto_conciliados || 0)} conta(s) marcada(s) como paga(s)`;
+      toast(n.erro ? 'AUVP: ' + n.erro : 'Dados da AUVP atualizados');
+    } catch (e) { toast('Erro ao atualizar: ' + e.message); }
+    btn.disabled = false;
+    btn.textContent = 'Atualizar da AUVP';
+    loadReconciliar();
   };
-
-  const p7d = document.getElementById('rec-p-7d');
-  if (p7d) p7d.onclick = () => {
-    const d = new Date(); d.setDate(d.getDate() - 7);
-    setPeriodo(d, new Date(), p7d);
-  };
-  const p15d = document.getElementById('rec-p-15d');
-  if (p15d) p15d.onclick = () => {
-    const d = new Date(); d.setDate(d.getDate() - 15);
-    setPeriodo(d, new Date(), p15d);
-  };
-  const pMes = document.getElementById('rec-p-mes');
-  if (pMes) pMes.onclick = () => {
-    const d = new Date();
-    const p1 = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
-    const ult = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
-    setPeriodo(p1, ult, pMes);
-  };
-  const pAnt = document.getElementById('rec-p-anterior');
-  if (pAnt) pAnt.onclick = () => {
-    const d = new Date();
-    const p1 = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
-    const ult = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0));
-    setPeriodo(p1, ult, pAnt);
-  };
-
-  // Se datas vazias, inicializa com mês atual
-  const deEl = document.getElementById('rec-de');
-  const ateEl = document.getElementById('rec-ate');
-  if (deEl && ateEl && !deEl.value) {
-    const hj = new Date();
-    const p1 = new Date(Date.UTC(hj.getUTCFullYear(), hj.getUTCMonth(), 1));
-    const ult = new Date(Date.UTC(hj.getUTCFullYear(), hj.getUTCMonth() + 1, 0));
-    deEl.value = p1.toISOString().slice(0, 10);
-    ateEl.value = ult.toISOString().slice(0, 10);
-  }
-
-  // Navegação por abas e cards de resumo
-  window.recMudarAba = function(aba) {
-    recAbaAtiva = aba;
-    document.querySelectorAll('.rec-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === aba));
-    renderReconciliacao();
-  };
-
-  document.querySelectorAll('.rec-tab-btn').forEach(btn => {
-    btn.onclick = () => window.recMudarAba(btn.dataset.tab);
-  });
-
-  const cardSumNovos = document.getElementById('card-sum-novos');
-  if (cardSumNovos) cardSumNovos.onclick = () => window.recMudarAba('novos');
-  const cardSumEntradas = document.getElementById('card-sum-entradas');
-  if (cardSumEntradas) cardSumEntradas.onclick = () => window.recMudarAba('entradas');
-  const cardSumNeutros = document.getElementById('card-sum-neutros');
-  if (cardSumNeutros) cardSumNeutros.onclick = () => window.recMudarAba('neutros');
-  const cardSumFortes = document.getElementById('card-sum-fortes');
-  if (cardSumFortes) cardSumFortes.onclick = () => window.recMudarAba('fortes');
-
+  carregarConciliacao();
   carregarContasMes();
+  carregarPadroes();
+}
+
+async function carregarPadroes() {
+  const padroes = await api('/api/conciliar/padroes').catch(() => []);
+  document.getElementById('conc-padroes').innerHTML = padroes.length ? padroes.map(p =>
+    `<tr><td class="mono">${p.padrao_transacao}</td><td><b>${p.descricao_lancamento}</b></td><td class="muted">${p.confirmacoes}x</td></tr>`).join('')
+    : '<tr><td colspan="3" class="muted">Nenhum padrão ainda — confirme conciliações para ensinar o sistema</td></tr>';
 }
 
 // ---------- contas do mês: anexar transação já inserida ----------
@@ -2220,7 +2160,6 @@ window.anexarConta = async function (lancId, txId) {
   toast(r.valorAtualizado ? 'Conta PAGA — valor atualizado pro real + padrão aprendido' : 'Conta PAGA — padrão aprendido');
   const el = document.getElementById('cmes-' + lancId);
   if (el) { el.style.transition = 'opacity .4s'; el.style.opacity = '0'; setTimeout(() => carregarContasMes(), 400); }
-  await api('/api/projecao?recalcular=1').catch(() => {});
 };
 
 // ---------- dialog universal "anexar pagamento" (usado em Contas do mês e Reconciliar) ----------
@@ -2268,7 +2207,6 @@ window.dialogAnexarPagamento = async function (lanc, aoConcluir, opts = {}) {
     if (r.erro) { toast('Erro: ' + r.erro); return; }
     modal.remove();
     toast(r.valorAtualizado ? 'PAGA — valor atualizado pro real + padrão aprendido' : 'PAGA — padrão aprendido');
-    await api('/api/projecao?recalcular=1').catch(() => {});
     aoConcluir && aoConcluir();
   }
   modal.querySelector('#anx-busca').oninput = e => { clearTimeout(modal._t); modal._t = setTimeout(() => carregar(e.target.value), 250); };
@@ -2278,7 +2216,6 @@ window.dialogAnexarPagamento = async function (lanc, aoConcluir, opts = {}) {
       await api('/api/lancamentos/' + lanc.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: true }) });
       modal.remove();
       toast('PAGA (sem transação anexada — pode anexar depois clicando nela)');
-      await api('/api/projecao?recalcular=1').catch(() => {});
       aoConcluir && aoConcluir();
     };
   } else {
@@ -2296,524 +2233,6 @@ window.dialogAnexarPagamento = async function (lanc, aoConcluir, opts = {}) {
   await carregar('');
 };
 
-async function analiseReconciliacao(forceRefresh = false) {
-  const status = document.getElementById('rec-status');
-  const box = document.getElementById('rec-resultado');
-  const de = document.getElementById('rec-de').value;
-  const ate = document.getElementById('rec-ate').value;
-  if (!de || !ate) { toast('Escolha o período (de / até)'); return; }
-  status.textContent = forceRefresh ? 'consultando AUVP no Open Finance…' : 'analisando dados…';
-  if (forceRefresh || !recPrevia) {
-    box.innerHTML = '<div class="rec-empty" style="opacity:0.6;">⏳ Carregando dados da AUVP e comparando…</div>';
-    document.getElementById('rec-summary').hidden = true;
-    document.getElementById('rec-tabs-bar').hidden = true;
-  }
-  try {
-    const r = await api('/api/reconciliacao/previa', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ de, ate, forceRefresh }) 
-    });
-    if (r.erro) { status.textContent = ''; box.innerHTML = `<div class="insight bad"><span class="ico">${ico('x')}</span><div class="txt"><b>Erro:</b> ${r.erro}</div></div>`; return; }
-    recPrevia = r;
-    status.textContent = '';
-    
-    // Seleciona aba inteligente padrão
-    if (r.novos && r.novos.length) recAbaAtiva = 'novos';
-    else if (r.neutros && r.neutros.length) recAbaAtiva = 'neutros';
-    else if (r.entradas && r.entradas.length) recAbaAtiva = 'entradas';
-    else recAbaAtiva = 'fortes';
-
-    document.querySelectorAll('.rec-tab-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.tab === recAbaAtiva);
-    });
-
-    renderReconciliacao();
-  } catch (err) {
-    status.textContent = '';
-    box.innerHTML = `<div class="insight bad"><span class="ico">${ico('x')}</span><div class="txt"><b>Erro:</b> ${err.message}</div></div>`;
-  }
-}
-
-const FONTE_LABEL = { 'auvp-mcp': ['cartão', 'f-cred'], 'auvp-bank': ['conta', 'f-bank'] };
-function contaCurta(nome) {
-  const n = (nome || '').toLowerCase();
-  if (n === 'itau') return 'itaú·conta';
-  if (n.includes('uniclass')) return 'itaú·cartão';
-  if (n === 'gold') return 'gold·cartão';
-  if (n.includes('btg black')) return 'btg·cartão';
-  if (n.includes('btg')) return 'btg·conta';
-  if (n.includes('nu pag')) return 'nubank·conta';
-  if (n === 'mercado pago') return 'mp·?';
-  return nome.slice(0, 14);
-}
-
-function cardFortes(f, i) {
-  return `<div class="rec-card" style="animation-delay:${Math.min(i * 20, 400)}ms">
-    <div class="r1"><span class="desc" title="${f.descricao}">${f.descricao.slice(0, 34)}</span><span class="val">${fmt(f.valor)}</span></div>
-    <div class="r2"><span class="dt">${f.data.slice(0, 10)}</span>${f.via_ia ? '<span class="ia-badge">IA</span>' : ''}<span class="match" style="margin:0; margin-left:auto;">→ <b>${f.vinculado_como.slice(0, 26)}</b></span></div>
-  </div>`;
-}
-
-function cardFraco(f, i) {
-  return `<div class="rec-card dv">
-    <div class="r1"><span class="desc" title="${f.transacao.descricao}">${f.transacao.descricao.slice(0, 34)}</span><span class="val">${fmt(f.transacao.valor)}</span></div>
-    <div class="r2"><span class="dt">${f.transacao.data}</span><span class="fbadge">${(FONTE_LABEL[f.transacao.fonte] || ['?', ''])[0]}</span></div>
-    <div class="match">IA: <b>${f.pode_ser.slice(0, 26)}</b> não é · ${f.motivo_ia ? f.motivo_ia.slice(0, 46) : 'parecido demais pra descartar'}</div>
-    <button class="btn-same" onclick="recForcarVinculo(${i})">é o mesmo gasto — vincular</button>
-  </div>`;
-}
-
-function cardNovo(n, i) {
-  const sel = n._sel !== false;
-  const conta = n._lancamentoManual ? (recPrevia.abertos || []).find(l => l.id === n._lancamentoManual) : (n.conta_do_mes ? { descricao: n.conta_do_mes.descricao, vencimento: n.conta_do_mes.vencimento, id: n.conta_do_mes.lancamento_id } : null);
-  let contaLbl = n.conta ? contaCurta(n.conta) : '';
-  if (contaLbl === 'mp·?') contaLbl = n.fonte === 'auvp-mcp' ? 'mp·cartão' : 'mp·conta';
-  return `<div class="rec-card nv ${sel ? 'sel' : 'nosel'}" data-i="${i}" onclick="recToggleSel(${i})">
-    <div class="r1">
-      <span class="desc-wrap"><span class="chkbox">${ico('check')}</span><span class="desc" title="${n.descricao}">${n.descricao}</span></span>
-      <span class="val" style="color:var(--red);">${fmt(n.valor)}</span>
-    </div>
-    <div class="r2">
-      <span class="dt">${n.data.slice(0, 10)}</span>
-      <span class="fbadge conta-badge" title="${n.conta || ''}">${contaLbl}</span>
-      ${n.parcela ? `<span class="fbadge" style="color:var(--cyan); border-color:rgba(0,214,143,.3);">${n.parcela}</span>` : ''}
-      ${conta && !n._marcarPaga ? `<span class="match" style="margin:0;">↔ <b>${conta.descricao.slice(0, 20)}</b></span>` : ''}
-    </div>
-    <div style="display:flex; gap:6px; margin-top:7px; align-items:center;">
-      ${n.parcela
-        ? `<span class="muted" style="font-size:11.5px; flex:1; color:var(--cyan); display:flex; align-items:center; gap:4px;">${ico('check')} Parcela vincula automaticamente à compra</span>`
-        : `<button class="btn-paga ${n._marcarPaga ? 'on' : ''}" style="margin-top:0; flex:1;" onclick="event.stopPropagation(); recAbrirSeletor(${i})">${n._marcarPaga && conta ? 'paga ' + conta.descricao.slice(0, 24) + ' (venc ' + conta.vencimento + ')' : 'marcar como conta do mês…'}</button>`
-      }
-      <button class="ghost" style="padding:4px 8px; font-size:11.5px; border:1px solid var(--border); border-radius:7px; color:var(--muted); white-space:nowrap;" onclick="event.stopPropagation(); recMoverParaOcultar('novos', ${i})" title="Ocultar transação: salva no banco como neutra, não afeta totais e nunca mais reaparece">👁️ Ocultar</button>
-    </div>
-  </div>`;
-}
-
-function cardNeutro(n, i) {
-  const sel = n._sel !== false;
-  const sinal = n.valor > 0 ? '+' : '';
-  let contaLbl = n.conta ? contaCurta(n.conta) : '';
-  if (contaLbl === 'mp·?') contaLbl = n.fonte === 'auvp-mcp' ? 'mp·cartão' : 'mp·conta';
-  const ehIgnorado = n.ignorado_calculo !== false;
-
-  return `<div class="rec-card rec-neutro ${sel ? 'sel' : 'nosel'}" data-neuti="${i}" onclick="recToggleNeutro(${i})">
-    <div class="r1">
-      <span class="desc-wrap">
-        <span class="chkbox">${ico('check')}</span>
-        <div>
-          <span class="desc" title="${n.descricao}" style="font-weight:600; color:var(--txt);">${n.descricao}</span>
-          <div style="margin-top:5px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-            <span class="rec-badge-neutro">${n.motivo || 'Movimentação Neutra'}</span>
-            <span class="rec-badge-ignore-tag">${ehIgnorado ? '🛡️ Neutro: não afeta receitas nem despesas' : '⚡ Contará nos totais'}</span>
-          </div>
-        </div>
-      </span>
-      <span class="val mono">${sinal}${fmt(n.valor)}</span>
-    </div>
-    <div class="r2" style="margin-top:10px; justify-content:space-between; align-items:center;">
-      <div style="display:flex; gap:6px; align-items:center;">
-        <span class="dt">${n.data}</span>
-        ${contaLbl ? `<span class="fbadge f-neutro">${contaLbl}</span>` : ''}
-      </div>
-      <div style="display:flex; gap:6px; align-items:center;">
-        ${(n.tipo === 'ignorado' || (n.motivo && n.motivo.includes('usuário'))) ? `<button class="ghost" style="padding:3px 8px; font-size:11px; border:1px solid var(--border); border-radius:6px;" onclick="event.stopPropagation(); recMoverDeVolta(${i})" title="Devolver para a lista original e reexibir">↩️ Desfazer (reexibir)</button>` : ''}
-        <button class="ghost" style="padding:3px 8px; font-size:11px;" onclick="event.stopPropagation(); recToggleIgnoreCalculo(${i})" title="Alternar se deve ser arquivado como neutro ou como gasto/receita comum">
-          ${ehIgnorado ? 'mudar p/ gasto ou receita comum' : 'voltar para ocultada (neutra)'}
-        </button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function renderReconciliacao() {
-  const r = recPrevia;
-  if (!r) return;
-  const box = document.getElementById('rec-resultado');
-  const summaryBox = document.getElementById('rec-summary');
-  const tabsBar = document.getElementById('rec-tabs-bar');
-
-  summaryBox.hidden = false;
-  tabsBar.hidden = false;
-  document.querySelectorAll('.rec-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === recAbaAtiva));
-
-  const novosArr = r.novos || [];
-  const entradasArr = r.entradas || [];
-  const neutrosArr = r.neutros || [];
-  const fortesArr = r.fortes || [];
-  const fracosArr = r.fracos || [];
-
-  const totNovos = novosArr.reduce((s, n) => s + n.valor, 0);
-  const totEntradas = entradasArr.reduce((s, e) => s + e.valor, 0);
-  const totNeutros = neutrosArr.reduce((s, n) => s + Math.abs(n.valor), 0);
-
-  document.getElementById('sum-novos').textContent = novosArr.length;
-  document.getElementById('sum-novos-val').textContent = novosArr.length ? `${fmt(totNovos)} a aprovar` : 'nenhum novo gasto';
-
-  document.getElementById('sum-entradas').textContent = entradasArr.length;
-  document.getElementById('sum-entradas-val').textContent = entradasArr.length ? `+${fmt(totEntradas)} em receitas` : 'nenhuma entrada nova';
-
-  document.getElementById('sum-neutros').textContent = neutrosArr.length;
-  document.getElementById('sum-neutros-val').textContent = neutrosArr.length ? `${fmt(totNeutros)} neutros apagados` : (r.neutrosJaSalvos ? `${r.neutrosJaSalvos} já arquivados no sistema` : 'nenhuma transferência');
-
-  document.getElementById('sum-fortes').textContent = fortesArr.length;
-  document.getElementById('sum-fortes-val').textContent = fortesArr.length ? `${fortesArr.length} provas vinculadas` : (r.duplicadas ? `${r.duplicadas} já no sistema` : 'zero duplicatas');
-
-  document.getElementById('tab-cnt-novos').textContent = novosArr.length;
-  document.getElementById('tab-cnt-neutros').textContent = neutrosArr.length;
-  document.getElementById('tab-cnt-entradas').textContent = entradasArr.length;
-  document.getElementById('tab-cnt-fortes').textContent = fortesArr.length + (r.duplicadas || 0);
-  
-  const tabFracosBtn = document.getElementById('tab-btn-fracos');
-  if (tabFracosBtn) {
-    tabFracosBtn.style.display = fracosArr.length ? 'inline-flex' : 'none';
-    document.getElementById('tab-cnt-fracos').textContent = fracosArr.length;
-  }
-
-  atualizarResumoSelecao();
-
-  if (recAbaAtiva === 'novos') {
-    const grupos = {};
-    for (const n of novosArr) {
-      let k = n.conta ? contaCurta(n.conta) : 'sem conta';
-      if (k === 'mp·?') k = n.fonte === 'auvp-mcp' ? 'mp·cartão' : 'mp·conta';
-      (grupos[k] = grupos[k] || []).push(n);
-    }
-    const grupoOrd = Object.entries(grupos).sort((a, b) => b[1].length - a[1].length);
-    const chipHTML = [['todos', 'Todos', novosArr.length], ...grupoOrd.map(([k, arr]) => [k, k, arr.length])]
-      .map(([k, lbl, cnt]) => `<button class="rec-chip ${!recFiltroConta || recFiltroConta === k ? 'on' : ''}" data-conta="${k}" onclick="recFiltrarConta('${k}')">${lbl} <b>${cnt}</b></button>`).join('');
-
-    const visiveis = recFiltroConta && recFiltroConta !== 'todos' ? (grupos[recFiltroConta] || []) : novosArr;
-    const idxVisiveis = new Set(visiveis.map(n => novosArr.indexOf(n)));
-
-    if (!novosArr.length) {
-      box.innerHTML = `<div class="rec-empty">${ico('check')} Nenhum novo gasto encontrado no período selecionado.<br><span style="font-size:12px;">Todas as compras deste intervalo já foram conciliadas ou arquivadas.</span></div>`;
-    } else {
-      box.innerHTML = `
-        ${Object.keys(grupos).length > 1 ? `<div class="rec-chips">${chipHTML}</div>` : ''}
-        <div class="rec-grid-cards">
-          ${novosArr.map((n, i) => idxVisiveis.has(i) ? cardNovo(n, i) : '').join('')}
-        </div>`;
-    }
-  } else if (recAbaAtiva === 'neutros') {
-    if (!neutrosArr.length) {
-      box.innerHTML = `<div class="rec-empty">${ico('check')} Nenhuma transferência ou pagamento de fatura pendente de arquivamento.<br><span style="font-size:12px;">${r.neutrosJaSalvos || 0} transferências/faturas deste período já constam gravadas no sistema como neutras.</span></div>`;
-    } else {
-      box.innerHTML = `
-        <div class="insight" style="border-color:var(--muted); margin-bottom:14px;">
-          <span class="ico">${ico('check')}</span>
-          <div class="txt">
-            <b>Movimentações Neutras Identificadas (Pagamentos de Fatura & Transferências Próprias)</b>
-            <span>Esses lançamentos são arquivados no extrato com visual atenuado ("apagado"), garantindo extrato bancário 100% auditável centavo por centavo, sem duplicar despesas e sem inflar receitas.</span>
-          </div>
-        </div>
-        <div class="rec-grid-cards">
-          ${neutrosArr.map((n, i) => cardNeutro(n, i)).join('')}
-        </div>`;
-    }
-  } else if (recAbaAtiva === 'entradas') {
-    if (!entradasArr.length) {
-      box.innerHTML = `<div class="rec-empty">${ico('check')} Nenhuma receita ou salário novo encontrado no período.</div>`;
-    } else {
-      box.innerHTML = `
-        <div class="insight good" style="margin-bottom:14px;">
-          <span class="ico">${ico('check')}</span>
-          <div class="txt">
-            <b>Entradas & Renda Realizada</b>
-            <span>Ao aprovar, essas entradas alimentam a renda realizada do mês e sincronizam o saldo real com as projeções financeiras.</span>
-          </div>
-        </div>
-        <div class="rec-grid-cards">
-          ${entradasArr.map((e, i) => `
-            <div class="rec-card nv ${e._sel !== false ? 'sel' : 'nosel'}" data-enti="${i}" onclick="recToggleEntrada(${i})" style="border-color:rgba(0,214,143,.4);">
-              <div class="r1">
-                <span class="desc-wrap"><span class="chkbox">${ico('check')}</span><span class="desc">${e.descricao}${e.renda_nome ? ' <span class="tag" style="font-size:10px; background:rgba(0,214,143,.15); color:var(--green);">' + e.renda_nome + '</span>' : ''}</span></span>
-                <span class="val up">+${fmt(e.valor)}</span>
-              </div>
-              <div class="r2">
-                <span class="dt">${e.data}</span>
-                <span class="fbadge f-bank">${e.natureza}</span>
-                <span style="margin-left:auto; display:flex; gap:6px;">
-                  <button class="ghost" style="padding:3px 8px; font-size:11px; border:1px solid var(--border); border-radius:6px; color:var(--muted);" onclick="event.stopPropagation(); recEntradaEntreContas(${i})" title="É dinheiro se movendo entre suas contas (ex: resgate de aplicação pra cobrir PIX) — marca como transferência própria, sem contar como renda">↔ Entre contas</button>
-                  <button class="ghost" style="padding:3px 8px; font-size:11px; border:1px solid var(--border); border-radius:6px; color:var(--muted);" onclick="event.stopPropagation(); recMoverParaOcultar('entradas', ${i})" title="Ocultar transação: salva no banco como neutra, não afeta totais e nunca mais reaparece">👁️ Ocultar</button>
-                </span>
-              </div>
-            </div>`).join('')}
-        </div>`;
-    }
-  } else if (recAbaAtiva === 'fracos') {
-    if (!fracosArr.length) {
-      box.innerHTML = `<div class="rec-empty">${ico('check')} A inteligência artificial não teve dúvidas sobre nenhum gasto.</div>`;
-    } else {
-      box.innerHTML = `<div class="rec-grid-cards">${fracosArr.map(cardFraco).join('')}</div>`;
-    }
-  } else if (recAbaAtiva === 'fortes') {
-    if (!fortesArr.length) {
-      box.innerHTML = `<div class="rec-empty">${ico('check')} Nenhuma evidência direta vinculada no período.<br><span style="font-size:11px;">(${r.duplicadas || 0} já haviam sido importadas anteriormente).</span></div>`;
-    } else {
-      box.innerHTML = `
-        <div class="insight good" style="margin-bottom:14px;">
-          <span class="ico">${ico('check')}</span>
-          <div class="txt">
-            <b>${fortesArr.length} Transações Já Vinculadas com Precisão (Zero Duplicações)</b>
-            <span>O sistema reconheceu que essas movimentações já existiam e apenas associou o Open Finance como prova documental.</span>
-          </div>
-        </div>
-        <div class="rec-grid-cards">${fortesArr.map(cardFortes).join('')}</div>`;
-    }
-  }
-
-  document.getElementById('rec-aplicar').onclick = aplicarReconciliacao;
-}
-
-window.recMoverParaOcultar = function (tipo, i) {
-  let item = null;
-  if (tipo === 'novos') {
-    item = (recPrevia.novos || []).splice(i, 1)[0];
-    if (item) item.valor = -Math.abs(item.valor);
-  } else if (tipo === 'entradas') {
-    item = (recPrevia.entradas || []).splice(i, 1)[0];
-    if (item) item.valor = Math.abs(item.valor);
-  }
-  if (!item) return;
-  item._origemLista = tipo;
-  item.natureza = 'ignorado';
-  item.tipo = 'ignorado';
-  item.motivo = 'Transação ocultada pelo usuário';
-  item.ignorado_calculo = true;
-  item._sel = true;
-  recPrevia.neutros = recPrevia.neutros || [];
-  recPrevia.neutros.unshift(item);
-  toast('Transação ocultada: será gravada no banco como neutra (sem afetar totais).');
-  renderReconciliacao();
-};
-window.recMoverParaIgnorado = window.recMoverParaOcultar;
-
-// Entrada é transferência entre contas próprias (ex: resgate de aplicação cobrindo PIX)
-window.recEntradaEntreContas = function (i) {
-  const e = (recPrevia.entradas || [])[i];
-  if (!e) return;
-  e.natureza = 'transferencia-propria';
-  e.tipo = 'entre-contas';
-  e.motivo = 'Transferência entre contas próprias (marcado pelo usuário)';
-  e.ignorado_calculo = true;
-  e._sel = true;
-  recPrevia.entradas.splice(i, 1);
-  recPrevia.neutros = recPrevia.neutros || [];
-  recPrevia.neutros.unshift(e);
-  toast('Marcada como transferência entre contas próprias: não conta como renda.');
-  renderReconciliacao();
-};
-
-window.recMoverDeVolta = function (i) {
-  const n = (recPrevia.neutros || [])[i];
-  if (!n) return;
-  recPrevia.neutros.splice(i, 1);
-  const orig = n._origemLista || (n.valor < 0 ? 'novos' : 'entradas');
-  if (orig === 'novos') {
-    n.valor = Math.abs(n.valor);
-    n.natureza = 'gasto';
-    n.tipo = undefined;
-    n.motivo = undefined;
-    n.ignorado_calculo = false;
-    recPrevia.novos = recPrevia.novos || [];
-    recPrevia.novos.unshift(n);
-  } else {
-    n.valor = Math.abs(n.valor);
-    n.natureza = 'entrada';
-    n.tipo = undefined;
-    n.motivo = undefined;
-    n.ignorado_calculo = false;
-    recPrevia.entradas = recPrevia.entradas || [];
-    recPrevia.entradas.unshift(n);
-  }
-  toast('Restaurado para a lista original.');
-  renderReconciliacao();
-};
-
-window.recToggleNeutro = function (i) {
-  const n = (recPrevia.neutros || [])[i];
-  if (!n) return;
-  n._sel = n._sel === false ? true : false;
-  const el = document.querySelector(`.rec-card.rec-neutro[data-neuti="${i}"]`);
-  if (el) {
-    el.classList.toggle('sel', n._sel !== false);
-    el.classList.toggle('nosel', n._sel === false);
-  }
-  atualizarResumoSelecao();
-};
-
-window.recToggleIgnoreCalculo = function (i) {
-  const n = (recPrevia.neutros || [])[i];
-  if (!n) return;
-  n.ignorado_calculo = !n.ignorado_calculo;
-  if (!n.ignorado_calculo) {
-    n.natureza = n.valor < 0 ? 'gasto' : 'entrada';
-    toast('Marcado para entrar nos totais de ' + (n.valor < 0 ? 'despesas' : 'receitas'));
-  } else {
-    n.natureza = n.tipo === 'entre-contas' ? 'transferencia-propria' : (n.tipo === 'ignorado' ? 'ignorado' : 'transferencia');
-    toast('Restaurado como neutro (não afeta cálculos)');
-  }
-  renderReconciliacao();
-};
-
-window.recToggleEntrada = function (i) {
-  const e = (recPrevia.entradas || [])[i];
-  if (!e) return;
-  e._sel = e._sel === false ? true : false;
-  const el = document.querySelector(`.rec-card[data-enti="${i}"]`);
-  if (el) {
-    el.classList.toggle('sel', e._sel !== false);
-    el.classList.toggle('nosel', e._sel === false);
-  }
-  atualizarResumoSelecao();
-};
-
-window.recFiltrarConta = function (k) {
-  recFiltroConta = (recFiltroConta === k || k === 'todos') ? (k === 'todos' ? null : recFiltroConta) : k;
-  if (k === 'todos') recFiltroConta = 'todos';
-  renderReconciliacao();
-};
-
-window.recToggleSel = function (i) {
-  const n = recPrevia.novos[i];
-  if (!n) return;
-  n._sel = n._sel === false ? true : false;
-  atualizarCardNovo(i);
-};
-
-function atualizarCardNovo(i) {
-  const el = document.querySelector(`.rec-card.nv[data-i="${i}"]`);
-  if (!el || !el.isConnected) return;
-  const tmp = document.createElement('div');
-  tmp.innerHTML = cardNovo(recPrevia.novos[i], i);
-  el.replaceWith(tmp.firstElementChild);
-  atualizarResumoSelecao();
-}
-
-function atualizarResumoSelecao() {
-  const r = recPrevia;
-  if (!r) return;
-  const selNovos = (r.novos || []).filter(n => n._sel !== false);
-  const selEntradas = (r.entradas || []).filter(e => e._sel !== false);
-  const selNeutros = (r.neutros || []).filter(n => n._sel !== false);
-  const pagas = selNovos.filter(n => n._marcarPaga && (n._lancamentoManual || n.conta_do_mes?.lancamento_id));
-
-  const totalSel = selNovos.length + selEntradas.length + selNeutros.length;
-  document.getElementById('sum-selecao').textContent = totalSel;
-
-  const partes = [];
-  if (selNovos.length) partes.push(`${selNovos.length} gastos (${fmt(selNovos.reduce((s, n) => s + n.valor, 0))})`);
-  if (selNeutros.length) partes.push(`${selNeutros.length} neutros apagados`);
-  if (selEntradas.length) partes.push(`${selEntradas.length} entradas`);
-  if (pagas.length) partes.push(`${pagas.length} contas pagas`);
-
-  document.getElementById('sum-pagas').textContent = partes.join(' · ') || 'Nenhum item selecionado';
-  document.getElementById('rec-aplicar').disabled = totalSel === 0;
-}
-
-window.recForcarVinculo = function (i) {
-  const f = recPrevia.fracos[i];
-  if (!f) return;
-  recPrevia.fortes.unshift({ descricao: f.transacao.descricao, data: f.transacao.data, valor: f.transacao.valor, vinculado_como: f.pode_ser, score: 85, via_ia: false, manual: true, pode_ser_id: f.pode_ser_id });
-  recPrevia.fracos.splice(i, 1);
-  toast('Vinculado — não duplica');
-  renderReconciliacao();
-};
-
-window.recAbrirSeletor = function (i) {
-  const n = recPrevia.novos[i];
-  if (!n) return;
-  const mesTx = (n.data || '').slice(0, 7);
-  const hojeRef = new Date();
-  const mesHoje = `${hojeRef.getFullYear()}-${String(hojeRef.getMonth() + 1).padStart(2, '0')}`;
-  const abertosRaw = recPrevia.abertos || [];
-  const score = l => {
-    const dLanc = Math.abs((new Date(l.vencimento) - new Date(n.data)) / 86400000);
-    const mesmoMes = (l.mes_ref === mesTx || l.mes_ref === mesHoje) ? -1000 : 0;
-    return dLanc + mesmoMes + Math.abs((l.valor || 0) - Math.abs(n.valor || 0)) * 0.01;
-  };
-  const abertos = abertosRaw.map((l, idx) => ({ l, idx })).sort((a, b) => score(a.l) - score(b.l)).map(o => o.l);
-  const atual = n._lancamentoManual || '';
-  const modal = document.createElement('dialog');
-  modal.innerHTML = `
-    <h3 style="margin-bottom:4px;">Associar a conta do mês</h3>
-    <p class="muted" style="margin-bottom:14px;">${n.descricao.slice(0, 45)} · ${fmt(n.valor)} · ${n.data}</p>
-    <select id="sel-conta" class="fselect" style="width:100%; margin-bottom:16px;">
-      <option value="">— não associar (só insere a transação) —</option>
-      ${abertos.map(l => `<option value="${l.id}" ${atual == l.id ? 'selected' : ''}>${l.descricao.slice(0, 40)} · ${fmt(l.valor)} · venc ${l.vencimento} (${l.mes_ref})</option>`).join('')}
-    </select>
-    <div style="display:flex; gap:10px; justify-content:flex-end;">
-      <button class="ghost" id="sel-cancelar">Cancelar</button>
-      <button class="cta" id="sel-ok">Associar</button>
-    </div>`;
-  document.body.appendChild(modal);
-  modal.showModal();
-  modal.querySelector('#sel-cancelar').onclick = () => modal.remove();
-  modal.querySelector('#sel-ok').onclick = () => {
-    const v = modal.querySelector('#sel-conta').value;
-    if (v) {
-      const l = abertos.find(x => x.id == v);
-      n._lancamentoManual = Number(v);
-      n._marcarPaga = true;
-    } else {
-      n._lancamentoManual = null;
-      n._marcarPaga = false;
-    }
-    modal.remove();
-    atualizarCardNovo(i);
-  };
-};
-
-async function aplicarReconciliacao() {
-  const escolhidos = (recPrevia.novos || []).filter(n => n._sel !== false);
-  const neutrosEscolhidos = (recPrevia.neutros || []).filter(n => n._sel !== false);
-  const entradasEscolhidas = (recPrevia.entradas || []).filter(e => e._sel !== false);
-
-  const lote = [
-    ...escolhidos.map(t => ({
-      acao: 'inserir', data: t.data, valor: t.valor, descricao: t.descricao, natureza: t.natureza || 'gasto', categoria: t.categoria, parcela: t.parcela, fonte: t.fonte, hash_externo: t.hash_externo,
-      conta: t.conta,
-      venc_fatura: t.venc_fatura || null,
-      observacao: t.observacao || null,
-      marcar_paga: !!(t._marcarPaga && (t._lancamentoManual || t.conta_do_mes?.lancamento_id)),
-      lancamento_id: t._lancamentoManual || t.conta_do_mes?.lancamento_id
-    })),
-    ...entradasEscolhidas.map(e => ({
-      acao: 'inserir', data: e.data, valor: e.valor, descricao: e.descricao, natureza: e.natureza,
-      fonte: e.fonte, hash_externo: e.hash_externo, renda_nome: e.renda_nome || null,
-      conta: e.conta
-    })),
-    ...neutrosEscolhidos.map(n => ({
-      acao: 'inserir', data: n.data, valor: n.valor, descricao: n.descricao, natureza: n.natureza,
-      fonte: n.fonte, hash_externo: n.hash_externo, conta: n.conta
-    })),
-    ...(recPrevia.fortes || []).filter(f => f.manual && f.pode_ser_id).map(f => ({ acao: 'vincular', gasto_id: f.pode_ser_id, hash_externo: null }))
-  ];
-
-  if (!lote.length) { toast('Nada selecionado'); return; }
-  const btn = document.getElementById('rec-aplicar');
-  btn.disabled = true; btn.textContent = 'gravando…';
-  try {
-    const r = await api('/api/reconciliacao/aplicar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lote, fonte: 'auvp-mcp' }) });
-    if (r.erro) { toast('Erro: ' + r.erro); btn.disabled = false; btn.textContent = 'Confirmar e Gravar'; return; }
-    const partes = [];
-    if (r.inseridas) partes.push(r.inseridas + ' gravados');
-    if (r.vinculadas) partes.push(r.vinculadas + ' vinculados');
-    if (r.marcadasPagas) partes.push(r.marcadasPagas + ' contas pagas');
-    toast('Pronto: ' + (partes.join(', ') || 'concluído'));
-    document.getElementById('rec-status').textContent = partes.join(', ') || 'Gravado com sucesso!';
-    document.getElementById('rec-status').className = 'rec-status up';
-    await api('/api/projecao?recalcular=1');
-    await analiseReconciliacao(false);
-  } catch (e) {
-    toast('Erro ao gravar: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Confirmar e Gravar';
-  }
-}
-
 document.getElementById('file-pdf').onchange = async e => {
   const log = document.getElementById('import-log');
   for (const f of [...e.target.files]) {
@@ -2829,10 +2248,7 @@ document.getElementById('file-pdf').onchange = async e => {
       }
     } catch (err) { log.innerHTML += `<div style="color:var(--red)">${ico('x')} ${f.name}: ${err.message}</div>`; }
   }
-  await api('/api/projecao?recalcular=1');
-  log.innerHTML += `<div class="up">${ico('check')} médias móveis recalculadas, insights regenerados</div>`;
-  toast('Importação concluída — confira a conciliação acima');
-  carregarConciliacao();
+  toast('Importação concluída — confira as sugestões em Reconciliar');
 };
 
 // ---------- CONFIGURAR (IA) ----------
@@ -2870,7 +2286,7 @@ window.abrirDrillParcelas = async function (mes) {
         html += `
           <div class="anx-item" style="cursor:default">
             <span class="tipo-badge tp-fixo">Fixo</span>
-            <span class="anx-desc"><b>${f.descricao}</b> <span class="muted" style="font-size:11px;">(Venc: dia ${f.dia_venc || '—'})</span></span>
+            <span class="anx-desc"><b>${f.descricao}</b> <span class="muted" style="font-size:11px;">(Venc: dia ${f.dia_venc || '—'}${f.pago ? ' · paga' : f.valor_origem && f.valor_origem.startsWith('último') ? ' · valor do ' + f.valor_origem : f.valor_origem === 'informado' ? ' · valor informado' : ''})</span></span>
             <span class="anx-meta">${f.categoria || 'Recorrente'}</span>
             <span class="anx-val">${fmt(f.valor)}</span>
           </div>`;
@@ -2936,7 +2352,7 @@ window.abrirDrillParcelas = async function (mes) {
           <span>RAIO-X 360° — ${mesCurto(mes).toUpperCase()}</span>
           <span class="tipo-badge ${d.totais.pct_comprometido > 80 ? 'tp-parcela' : 'tp-fixo'}">${d.totais.pct_comprometido}% comprometido</span>
         </h3>
-        <p class="muted">Todas as saídas e compromissos programados para este mês</p>
+        <p class="muted">Só o que já foi gasto ou está agendado para este mês${d.totais.total_dia_a_dia ? ' · dia a dia já gasto: ' + fmt(d.totais.total_dia_a_dia) : ''}</p>
       </div>
       <button class="dlg-x" onclick="this.closest('dialog').remove()">${ico('x')}</button>
     </div>
@@ -2947,11 +2363,11 @@ window.abrirDrillParcelas = async function (mes) {
         <div class="val mono ${d.totais.total_comprometido > 0 ? 'down' : ''}">${fmt(d.totais.total_comprometido)}</div>
       </div>
       <div class="dlg-360-kpi">
-        <div class="lbl">Renda Prevista</div>
+        <div class="lbl">Renda do mês</div>
         <div class="val mono">${fmt(d.totais.renda)}</div>
       </div>
       <div class="dlg-360-kpi">
-        <div class="lbl">Sobra Livre Estimada</div>
+        <div class="lbl">Sobra livre</div>
         <div class="val mono up">${fmt(d.totais.sobra_livre)}</div>
       </div>
     </div>
@@ -3060,7 +2476,7 @@ window.abrirModalFaturasAbertas = async function () {
           <span>💳 FATURAS ABERTAS — VENCIMENTO ${mesLabel}</span>
           <span class="tipo-badge tp-parcela">${fmt(fa.total)}</span>
         </h3>
-        <p class="muted">Cálculo em tempo real: parcelas contratuais + compras do ciclo atual (à vista e novas parcelas)</p>
+        <p class="muted">Comprometido até hoje: compras já lançadas no ciclo + parcelas programadas. Tem que bater com a fatura aberta no app de cada banco.</p>
       </div>
       <button class="dlg-x" onclick="this.closest('dialog').remove()">${ico('x')}</button>
     </div>
@@ -3094,8 +2510,11 @@ window.abrirModalFaturasAbertas = async function () {
               <div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--line);">
                 • Parcelas agendadas: <b class="mono" style="color:var(--txt);">${fmt(c.parcelas_agendadas || 0)}</b><br>
                 • Compras no ciclo: <b class="mono" style="color:var(--txt);">${fmt(c.compras_ciclo || 0)}</b>
-                ${c.transicao_cartao_antigo ? `<br>• Transição cartão antigo: <b class="mono" style="color:var(--txt);">${fmt(c.transicao_cartao_antigo)}</b> <small title="7 compras no cartão Uniclass antes da troca pelo Signature (aguardando PDF de fechamento)">ℹ️</small>` : ''}
               </div>
+              <label style="display:flex; align-items:center; gap:8px; margin-top:8px;">Valor no app:
+                <input type="number" step="0.01" inputmode="decimal" class="conf-app" data-total="${c.total}" style="width:110px;" placeholder="0,00">
+                <span class="conf-dif muted"></span>
+              </label>
             </div>
           </div>
           <button class="ghost" style="width:100%; padding:6px 10px; font-size:12px;" onclick="verNoExtratoCartao('${c.id}')">
@@ -3106,7 +2525,7 @@ window.abrirModalFaturasAbertas = async function () {
     </div>
 
     <div style="background:rgba(77,171,255,.08); border:1px solid rgba(77,171,255,.25); border-radius:10px; padding:10px 14px; font-size:12px; color:#c3d0de; line-height:1.5;">
-      💡 <b>Integração com a Projeção:</b> Este total de <b>${fmt(fa.total)}</b> alimenta automaticamente o dinheiro comprometido de <b>${mesLabel}</b> na aba <b>Projeção</b>, garantindo que o fluxo futuro considere tanto as parcelas quanto as compras à vista já feitas no cartão.
+      💡 Este total de <b>${fmt(fa.total)}</b> é o que já está comprometido nas faturas de <b>${mesLabel}</b>. Ele sobe conforme você usa os cartões até cada fechamento — isso é dado novo, não previsão.
     </div>
 
     <div class="dlg-anexar-foot" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--line); display:flex; justify-content:flex-end;">
@@ -3115,6 +2534,17 @@ window.abrirModalFaturasAbertas = async function () {
   `;
 
   document.body.appendChild(modal);
+  // conferência com o app do banco: mostra a diferença na hora
+  modal.querySelectorAll('.conf-app').forEach(inp => {
+    inp.oninput = () => {
+      const dif = inp.closest('label').querySelector('.conf-dif');
+      const v = parseFloat(String(inp.value).replace(',', '.'));
+      if (!isFinite(v)) { dif.textContent = ''; return; }
+      const d = Math.round((v - Number(inp.dataset.total)) * 100) / 100;
+      dif.textContent = d === 0 ? '✓ bate' : `diferença ${fmt(d)}`;
+      dif.style.color = d === 0 ? 'var(--green)' : 'var(--amber)';
+    };
+  });
   modal.showModal();
 };
 
@@ -3213,7 +2643,7 @@ function renderContasConfig(contas) {
         cicloHtml = `
           <div style="font-size:12px; color:var(--muted); margin-top:8px;">
             <span>Fechamento: <b>Dia ${c.dia_fechamento}</b></span> · 
-            <span>Vencimento: <b>Dia ${c.dia_vencimento}</b></span>
+            <span>Vencimento: <b>Dia ${c.dia_vencimento}</b></span>${c.perfil === 'aprendido' ? ' · <span style="color:var(--amber)" title="Calculado pelas faturas da AUVP. Edite e salve para confirmar.">aprendido das faturas, confira</span>' : ''}
           </div>`;
       } else {
         cicloHtml = `
@@ -3454,8 +2884,6 @@ if (btnPriv) {
     localStorage.setItem('finflow.privado', modoPrivado ? '1' : '0');
     atualizarBtnPriv();
     toast(modoPrivado ? 'Valores ocultos' : 'Valores visíveis');
-    const ativa = document.querySelector('.nav-item.active')?.dataset.view;
-    if (ativa !== 'visao') loadVisao();
     reRenderAtiva();
   };
 }
@@ -3491,4 +2919,13 @@ if (_btnAtualizarIA) {
 }
 
 const perExtratos = barraPeriodo('per-bar-extratos', 'finflow.per.extratos', () => carregarTransacoes());
-loadMeses().then(() => loadVisao());
+// topo: quando os dados da AUVP foram atualizados (antes vinha da Visão, que saiu do menu)
+async function atualizarTopo() {
+  const cfg = await api('/api/config/auvp').catch(() => null);
+  const el = document.getElementById('top-sync');
+  if (el) el.textContent = cfg && cfg.ultimo_sync ? 'AUVP: ' + cfg.ultimo_sync.slice(8, 10) + '/' + cfg.ultimo_sync.slice(5, 7) + ' ' + cfg.ultimo_sync.slice(11, 16) : 'AUVP: sem sincronização';
+  const f = document.getElementById('top-fontes');
+  if (f) f.textContent = 'Recorrências · Contas do mês · Projeção · Reconciliar';
+}
+// abre direto na Projeção (decisão de 15/10: só o core no menu)
+loadMeses().then(() => { loadProjecao(); atualizarTopo(); });

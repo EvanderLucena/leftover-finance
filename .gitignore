@@ -87,3 +87,6 @@ app/scripts/*
 !app/scripts/super-parser.js
 !app/scripts/sync-diario.js
 
+
+# Teste de ouro: dados reais (banco, AUVP e valores esperados) ficam só na máquina
+app/test/fixtures/
