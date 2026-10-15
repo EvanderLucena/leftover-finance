@@ -1,4 +1,5 @@
-FROM node:20-alpine
+# node:sqlite (DatabaseSync) precisa do Node 22.5+
+FROM node:24-alpine
 
 WORKDIR /app
 

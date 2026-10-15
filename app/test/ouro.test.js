@@ -137,6 +137,23 @@ describe('Fase 2 — cartões e transações vindos da AUVP, sem duplicar o que 
   });
 });
 
+describe('Hoje — caixa até o fim do mês', () => {
+  test('o que entra segue a data do dinheiro (o pagamento do fim do mês entra no caixa deste mês) e a conta fecha', async () => {
+    const s = await subirServidor();
+    try {
+      const h = await s.api('/api/hoje');
+      const corte = s.lerBanco(db => db.prepare('SELECT id FROM rendas WHERE ativo=1 AND competencia_corte IS NOT NULL').all().map(r => r.id));
+      for (const id of corte) {
+        const r = h.rendas_a_receber.find(x => x.renda_id === id);
+        assert.ok(r, `renda ${id} (paga no fim do mês) deveria estar a receber em ${h.mes}`);
+        assert.ok(r.previsto.startsWith(h.mes_iso), `renda ${id} prevista para ${r.previsto}, fora de ${h.mes_iso}`);
+      }
+      assert.equal(centavos(h.caixa_fim_do_mes), centavos(h.disponivel) + centavos(h.a_receber) - centavos(h.a_pagar));
+      assert.equal(centavos(h.caixa_apos_faturas), centavos(h.caixa_fim_do_mes) - centavos(h.faturas_abertas.total));
+    } finally { await s.parar(); }
+  });
+});
+
 describe('Fase 5 — Reconciliar: uma regra só para sugerir e para marcar sozinho', () => {
   test('a conciliação automática só marca o que o Reconciliar sugere como "certo" e sem ambiguidade', async () => {
     const s = await subirServidor();

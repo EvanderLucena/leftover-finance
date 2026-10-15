@@ -6,7 +6,8 @@ const ICONES_CONTA = { BANK: '🏦', CREDIT: '💳' };
 
 async function saldosAUVP() {
   // 1. cache: procurar último sync com lista detalhada
-  const registros = db.prepare("SELECT resultados, data_sync FROM sincronizacoes_auvp WHERE tipo='sync' ORDER BY id DESC LIMIT 1").get();
+  // o registro mais recente que traz a lista de contas (sincronização manual, do núcleo ou de saldos)
+  const registros = db.prepare("SELECT resultados, data_sync FROM sincronizacoes_auvp WHERE tipo IN ('sync', 'saldos') AND instr(resultados, 'contasLista') > 0 ORDER BY id DESC LIMIT 1").get();
   if (registros) {
     try {
       const j = JSON.parse(registros.resultados);

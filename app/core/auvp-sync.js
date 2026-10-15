@@ -151,6 +151,20 @@ function gravarFaturas({ listas, itens }) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
+// ---------- categorias da AUVP (nome pelo id que vem em cada transação) ----------
+async function baixarCategorias() {
+  const r = await chamarAUVP('chamar_endpoint', { metodo: 'GET', caminho: '/categories' });
+  const up = db.prepare('INSERT INTO auvp_categorias (id, nome) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET nome = excluded.nome');
+  for (const c of r.categories || []) if (c.category_id != null && c.description) up.run(c.category_id, c.description);
+}
+function categoriaAUVP(t) {
+  try {
+    const id = JSON.parse(t.bruto || '{}').categoryId;
+    const c = id != null && db.prepare('SELECT nome FROM auvp_categorias WHERE id = ?').get(id);
+    return c ? c.nome : null;
+  } catch (e) { return null; }
+}
+
 // ---------- transações da AUVP -> tabela `transacoes` (Contas do mês e Reconciliar) ----------
 const parcelaDaDescricao = d => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\s*$/); return m && +m[1] >= 1 && +m[1] <= +m[2] ? `${+m[1]}/${+m[2]}` : null; };
 
@@ -219,13 +233,18 @@ function importarParaTransacoes(hoje = hojeISO()) {
       else {
         const [r] = aplicarRegras([{ descricao: t.descricao, valor: t.valor }]);
         natureza = r.natureza || 'gasto';
-        categoria = r.categoria || null;
+        categoria = r.categoria || categoriaAUVP(t) || null; // regra sua primeiro; senão a categoria que a AUVP deu
       }
       const hash = (t.valor > 0 ? 'auvp-pos-' : 'auvp-') + t.id;
       const r = ins.run(t.data, t.valor, t.descricao, ehCartao ? 'auvp-mcp' : 'auvp-bank', natureza, categoria,
         ehCartao ? parcelaDaDescricao(t.descricao) : null, (contas.get(t.conta_id) || {}).nome || null, hash, null);
       if (r.changes) novas++;
     }
+    // gasto que entrou sem categoria (antes de existir esta regra) recebe a da AUVP
+    const semCat = db.prepare("SELECT id, hash_unico FROM transacoes WHERE categoria IS NULL AND natureza = 'gasto' AND hash_unico LIKE 'auvp-%'").all();
+    const daAUVP = db.prepare('SELECT bruto FROM auvp_transacoes WHERE id = ?');
+    const poe = db.prepare('UPDATE transacoes SET categoria = ? WHERE id = ?');
+    for (const x of semCat) { const t = daAUVP.get(Number(x.hash_unico.replace(/^auvp-(pos-|neg-)?/, ''))); const c = t && categoriaAUVP(t); if (c) poe.run(c, x.id); }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   return novas;
@@ -243,7 +262,10 @@ async function sincronizarAUVP({ diasAtras = 60, hoje = hojeISO() } = {}) {
   const de = new Date(Date.parse(hoje + 'T12:00:00Z') - diasAtras * 864e5).toISOString().slice(0, 10);
   const txs = await baixarTransacoes(de);
   gravarTransacoes(txs);
-  const { contas } = await require('../scripts/auvp-client').pullContas(true);
+  try { await baixarCategorias(); } catch (e) { /* sem categorias: segue só com as regras */ }
+  const { contas, resumo } = await require('../scripts/auvp-client').pullContas(true);
+  // saldos das contas: cache que a aba Hoje lê (scripts/saldos.js)
+  db.prepare("INSERT INTO sincronizacoes_auvp (tipo, resultados) VALUES ('saldos', ?)").run(JSON.stringify({ contasLista: contas, contas: resumo }));
   descobrirCartoes((contas || []).filter(c => c.subtipo === 'CREDIT_CARD' || c.tipo === 'CREDIT'));
   gravarFaturas(await baixarFaturas());
   return { transacoes_auvp: txs.length, perfis_aprendidos: aprenderPerfis(hoje), ...posSincronizacao(hoje) };
@@ -271,4 +293,4 @@ function importarRetrato(dir, hoje = hojeISO()) {
   return posSincronizacao(hoje);
 }
 
-module.exports = { sincronizarAUVP, descobrirCartoes, aprenderPerfis, fontePdfDaConta, importarRetrato, importarParaTransacoes, gravarTransacoes, gravarFaturas };
+module.exports = { sincronizarAUVP, chamarAUVP, descobrirCartoes, aprenderPerfis, fontePdfDaConta, importarRetrato, importarParaTransacoes, gravarTransacoes, gravarFaturas };

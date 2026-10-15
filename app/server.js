@@ -550,10 +550,6 @@ app.post('/api/extratos/importar-pdf', express.raw({ type: '*/*', limit: '20mb' 
     const arquivo = req.headers['x-arquivo'] || 'sem-nome.pdf';
     processarImportacaoBuffer(req.body, fonte, arquivo)
       .then(r => {
-        try {
-          const { gerarInsightsComIA } = require('./scripts/insights-ia');
-          gerarInsightsComIA(true).catch(() => {});
-        } catch (e) {}
         res.json({ ok: true, ...r });
       })
       .catch(e => res.status(500).json({ erro: e.message }));
@@ -848,29 +844,6 @@ app.get('/api/evolucao-cartao', (req, res) => {
   res.json(db.prepare(sql).all(...params));
 });
 
-// ---------- API: Insights, fluxo & Diagnóstico IA ----------
-const { gerarFluxo } = require('./scripts/insights');
-const { obterUltimosInsights, gerarInsightsComIA } = require('./scripts/insights-ia');
-
-app.get('/api/insights', (req, res) => {
-  const ultimos = obterUltimosInsights();
-  res.json({
-    insights: ultimos.insights,
-    gerado_em: ultimos.gerado_em,
-    fonte: ultimos.fonte,
-    fluxo: gerarFluxo(req.query.mes || MES_ATUAL())
-  });
-});
-
-app.post('/api/insights/gerar', async (req, res) => {
-  try {
-    const resultado = await gerarInsightsComIA(true);
-    res.json(resultado);
-  } catch (e) {
-    res.status(500).json({ ok: false, erro: e.message });
-  }
-});
-
 // ---------- API: dívidas, faturas e Projeção — tudo do motor único (core/comprometido.js) ----------
 // Regra de 15/10/2026: só comprometimento real (gasto ou agendado), nenhuma previsão de gasto.
 const motor = require('./core/comprometido');
@@ -947,71 +920,16 @@ app.get('/api/projecao', (req, res) => {
 });
 
 // ---------- API: Visão Geral (Command Center) ----------
-app.get('/api/visao', async (req, res) => {
+// ---------- API: Hoje (caixa até o fim do mês) — motor único (core/comprometido.js) ----------
+app.get('/api/hoje', async (req, res) => {
   try {
-    const dataSimulada = req.query.data_ref || null;
-    const hoje = dataSimulada ? new Date(dataSimulada) : new Date();
-    const aY = hoje.getFullYear(), aM = hoje.getMonth() + 1;
-    const mesIso = `${aY}-${String(aM).padStart(2, '0')}`;
-    const mesRef = `${String(aM).padStart(2, '0')}-${aY}`;
-
-    const { saldosAUVP } = require('./scripts/saldos');
-    const saldos = await saldosAUVP();
-    const todas = saldos.saldos || [];
-    const disponivel = todas.filter(s => s.tipo === 'BANK').reduce((s, c) => s + c.valor, 0);
-    const faturasAbertas = todas.filter(s => s.tipo === 'CREDIT' && s.valor < 0).reduce((s, c) => s + Math.abs(c.valor), 0);
-
-    // tudo do motor único (core/comprometido.js): renda por competência, comprometido real, sobra livre
-    const mm = motor.comprometidoMes(mesIso, calendario.hojeISO(hoje));
-    const rendaMes = mm.renda;
-    const rendaRealizada = mm.rendas.reduce((s, r) => s + r.realizada, 0);
-    const comprometido = mm.comprometido - mm.dia_a_dia;
-    const gastoReal = mm.dia_a_dia;
-    const sobraMes = mm.sobra_livre;
-
-    const mesId = db.prepare('SELECT id FROM meses WHERE ref=?').get(mesRef);
-    const contasAPagar = mesId ? db.prepare('SELECT COALESCE(SUM(ABS(valor)),0) tot FROM lancamentos WHERE mes_id=? AND pago=0').get(mesId.id).tot : 0;
-    const totalContasPendentes = mesId ? db.prepare('SELECT count(*) tot FROM lancamentos WHERE mes_id=? AND pago=0').get(mesId.id).tot : 0;
-    const saldoAposContas = disponivel - contasAPagar;
-    const proximos = mesId ? db.prepare(`SELECT l.descricao, l.valor, l.vencimento, l.pago FROM lancamentos l
-      WHERE l.mes_id=? AND l.pago=0 ORDER BY l.vencimento LIMIT 5`).all(mesId.id) : [];
-
-    const calDividas = motor.dividas(calendario.hojeISO(hoje));
-    const dividaTotal = calDividas.total_passivo_restante;
-    const alivio3 = calDividas.alivio_3m;
-    const faturasAbertasCalculadas = motor.faturasAbertas(calendario.hojeISO(hoje));
-    const faturaProxima = faturasAbertasCalculadas.total;
-    const pendentesDetalhe = mm.rendas.filter(r => !r.recebida).map(r => ({ renda_id: r.id, nome: r.nome, estimada: r.estimada }));
-    const entradasPendentes = Math.round(pendentesDetalhe.reduce((s, r) => s + r.estimada, 0) * 100) / 100;
-
-    const fluxo = gerarFluxo(mesRef);
-    const { obterUltimosInsights } = require('./scripts/insights-ia');
-    const ultimosInsights = obterUltimosInsights();
-
-    res.json({
-      mes: mesRef, mes_iso: mesIso,
-      disponivel: Math.round(disponivel * 100) / 100,
-      contas_a_pagar: Math.round(contasAPagar * 100) / 100,
-      total_contas_pendentes: totalContasPendentes,
-      saldo_apos_contas: Math.round(saldoAposContas * 100) / 100,
-      faturas_abertas: Math.round(faturasAbertas * 100) / 100,
-      fatura_proxima: Math.round(faturaProxima * 100) / 100,
-      faturas_abertas_detalhe: faturasAbertasCalculadas,
-      entradas_pendentes: Math.round(entradasPendentes * 100) / 100,
-      pendentes_detalhe: pendentesDetalhe,
-      renda_mes: Math.round(rendaMes * 100) / 100,
-      renda_realizada: Math.round(rendaRealizada * 100) / 100,
-      comprometido: Math.round(comprometido * 100) / 100,
-      gasto_real: Math.round(gastoReal * 100) / 100,
-      sobra_mes: Math.round(sobraMes * 100) / 100,
-      proximos, divida_total: Math.round(dividaTotal * 100) / 100,
-      alivio_3meses: Math.round(alivio3 * 100) / 100,
-      fluxo,
-      insights: ultimosInsights.insights,
-      insights_ia_gerado_em: ultimosInsights.gerado_em,
-      insights_fonte: ultimosInsights.fonte,
-      quando: saldos.quando
-    });
+    let saldos = { saldos: [], quando: null };
+    try { saldos = await require('./scripts/saldos').saldosAUVP(); }
+    catch (e) { saldos.erro = e.message; } // sem AUVP: a tela mostra o resto e avisa
+    const contas = (saldos.saldos || []).filter(s => s.tipo === 'BANK');
+    const disponivel = contas.reduce((s, c) => s + c.valor, 0);
+    const c = motor.caixaAteFimDoMes(disponivel, calendario.hojeISO());
+    res.json({ ...c, saldos: contas, saldos_quando: saldos.quando, saldos_erro: saldos.erro || null });
   } catch (e) {
     res.status(500).json({ erro: e.message });
   }
@@ -1091,23 +1009,6 @@ app.get('/api/extrato-conta', async (req, res) => {
   }
 });
 
-// ---------- API: Config IA ----------
-const ia = require('./scripts/ia');
-app.get('/api/config/ia', (req, res) => {
-  const cfg = ia.getConfigIA();
-  res.json({ url: cfg.url, model: cfg.model, temKey: !!cfg.key });
-});
-app.post('/api/config/ia', (req, res) => {
-  const { url, key, model } = req.body;
-  const atual = ia.getConfigIA();
-  ia.salvarConfigIA({ url, key: key || atual.key, model });
-  res.json({ ok: true });
-});
-app.post('/api/config/ia/testar', async (req, res) => {
-  const cfg = ia.getConfigIA();
-  res.json(await ia.testarIA(cfg));
-});
-
 // ---------- API: Config AUVP ----------
 const auvpClient = require('./scripts/auvp-client');
 app.get('/api/config/auvp', (req, res) => {
@@ -1158,10 +1059,6 @@ app.post('/api/auvp/sync', async (req, res) => {
       const { checarConsistencia } = require('./scripts/check-consistencia');
       consistencia = checarConsistencia();
     } catch (e) { /* guardrail nunca derruba o sync */ }
-    try {
-      const { gerarInsightsComIA } = require('./scripts/insights-ia');
-      gerarInsightsComIA(true).catch(() => {});
-    } catch (e) {}
     res.json({ ok: true, contas: contas.resumo, agendadas: agendadas.length, contasLista: contas.contas, auto_conciliados: autoConciliados, consistencia, nucleo });
   } catch (e) {
     res.status(500).json({ erro: e.message });
@@ -1245,165 +1142,6 @@ app.get('/api/importacoes/ultima', (req, res) => {
 });
 app.get('/api/extratos/fontes', (req, res) => {
   res.json(db.prepare('SELECT fonte, COUNT(*) n FROM transacoes GROUP BY fonte ORDER BY n DESC').all());
-});
-
-// ---------- API: compras (fase 4 — fonte de verdade única) ----------
-app.get('/api/compras', (req, res) => {
-  const { busca, status } = req.query;
-  let sql = `
-    SELECT c.id, c.estabelecimento, c.valor_parcela, c.n_parcelas, c.mes_inicio, c.fonte_origem,
-      c.cancelada, c.cancelada_em, c.motivo_cancelamento,
-      (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id AND p.status='cobrada') cobradas,
-      (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id AND p.status='agendada') agendadas,
-      (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id) total_parcelas_criadas,
-      (SELECT COUNT(*) FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=c.id)) evidencias,
-      (SELECT t.descricao FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=c.id) ORDER BY t.id DESC LIMIT 1) descricao_original,
-      EXISTS (
-        SELECT 1 FROM compras c2
-        WHERE c2.id != c.id AND c2.cancelada = 0
-          AND c2.estabelecimento = c.estabelecimento
-          AND ABS(c2.valor_parcela - c.valor_parcela) <= 1.00
-      ) tem_paralela
-    FROM compras c WHERE c.cancelada = 0`;
-  const params = [];
-  if (busca) {
-    const buscaNorm = busca.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    sql += ` AND (
-      c.estabelecimento LIKE ? 
-      OR c.estabelecimento LIKE ?
-      OR EXISTS (
-        SELECT 1 FROM parcelas p 
-        JOIN transacoes t ON t.parcela_id=p.id 
-        WHERE p.compra_id=c.id AND (t.descricao LIKE ? OR t.descricao LIKE ?)
-      )
-    )`;
-    params.push('%' + busca + '%', '%' + buscaNorm + '%', '%' + busca + '%', '%' + buscaNorm + '%');
-  }
-  if (status === 'paralelas') {
-    sql += ` AND EXISTS (
-      SELECT 1 FROM compras c2
-      WHERE c2.id != c.id AND c2.cancelada = 0
-        AND c2.estabelecimento = c.estabelecimento
-        AND ABS(c2.valor_parcela - c.valor_parcela) <= 1.00
-    )`;
-  } else if (status === 'canceladas') {
-    sql = sql.replace('WHERE c.cancelada = 0', 'WHERE c.cancelada = 1');
-  }
-  sql += ' ORDER BY c.mes_inicio DESC, c.estabelecimento';
-  res.json(db.prepare(sql).all(...params));
-});
-
-// Compras canceladas (histórico/auditoria)
-app.get('/api/compras-canceladas', (req, res) => {
-  const rows = db.prepare(`
-    SELECT c.id, c.estabelecimento, c.valor_parcela, c.n_parcelas, c.mes_inicio, c.fonte_origem,
-      c.cancelada_em, c.motivo_cancelamento,
-      (SELECT COUNT(*) FROM parcelas p WHERE p.compra_id=c.id AND p.status='cancelada') parcelas_canceladas,
-      (SELECT COUNT(*) FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=c.id) AND t.natureza='ignorado') transacoes_ignoradas
-    FROM compras c WHERE c.cancelada = 1
-    ORDER BY c.cancelada_em DESC`).all();
-  res.json(rows);
-});
-
-app.get('/api/compras/:id', (req, res) => {
-  const c = db.prepare('SELECT * FROM compras WHERE id=?').get(req.params.id);
-  if (!c) return res.status(404).json({ erro: 'compra não encontrada' });
-  const parcelas = db.prepare('SELECT * FROM parcelas WHERE compra_id=? ORDER BY n').all(c.id);
-  const transacoes = db.prepare(`
-    SELECT t.id, t.data, t.valor, t.descricao, t.fonte, t.parcela, t.venc_fatura, t.natureza, t.categoria, t.parcela_id
-    FROM transacoes t WHERE t.parcela_id IN (SELECT id FROM parcelas WHERE compra_id=?)
-    ORDER BY t.data`).all(c.id);
-  res.json({ ...c, parcelas, transacoes });
-});
-
-// Cancelar compra (estorno/cancelamento do merchant — ex: compra cancelada no Mercado Livre)
-// - parcelas marcadas 'cancelada' (saem da projeção/calendário)
-// - evidências (transações) viram tombstone: natureza='ignorado' — MANTÉM hash_unico,
-//   senão a AUVP reenviaria a mesma transação e ela voltaria como "nova" no próximo sync
-// - grava motivo e data do cancelamento
-app.post('/api/compras/:id/cancelar', (req, res) => {
-  const c = db.prepare('SELECT * FROM compras WHERE id=?').get(req.params.id);
-  if (!c) return res.status(404).json({ erro: 'compra não encontrada' });
-  if (c.cancelada) return res.status(400).json({ erro: 'compra já está cancelada' });
-  const motivo = (req.body && req.body.motivo) || 'Compra cancelada / estornada pelo estabelecimento';
-
-  const txs = db.prepare(`
-    SELECT id, natureza FROM transacoes
-    WHERE parcela_id IN (SELECT id FROM parcelas WHERE compra_id=?)`).all(c.id);
-
-  const cancelarTx = db.prepare("UPDATE transacoes SET natureza='ignorado' WHERE id=?");
-  const cancelarParcelas = db.prepare("UPDATE parcelas SET status='cancelada' WHERE compra_id=?");
-  const cancelarCompra = db.prepare("UPDATE compras SET cancelada=1, cancelada_em=datetime('now'), motivo_cancelamento=? WHERE id=?");
-
-  const run = () => {
-    db.exec('BEGIN');
-    try {
-      for (const t of txs) {
-        if (t.natureza === 'gasto') cancelarTx.run(t.id);
-      }
-      cancelarParcelas.run(c.id);
-      cancelarCompra.run(motivo, c.id);
-      db.exec('COMMIT');
-    } catch (e) {
-      db.exec('ROLLBACK');
-      throw e;
-    }
-  };
-  run();
-
-  res.json({
-    ok: true,
-    compra_id: c.id,
-    parcelas_canceladas: db.prepare('SELECT COUNT(*) n FROM parcelas WHERE compra_id=? AND status=\'cancelada\'').get(c.id).n,
-    transacoes_ignoradas: txs.filter(t => t.natureza === 'gasto').length
-  });
-});
-
-// Reverter cancelamento (caso o estorno não se confirme)
-app.post('/api/compras/:id/reverter-cancelamento', (req, res) => {
-  const c = db.prepare('SELECT * FROM compras WHERE id=?').get(req.params.id);
-  if (!c) return res.status(404).json({ erro: 'compra não encontrada' });
-  if (!c.cancelada) return res.status(400).json({ erro: 'compra não está cancelada' });
-
-  const reverterTx = db.prepare("UPDATE transacoes SET natureza='gasto' WHERE parcela_id IN (SELECT id FROM parcelas WHERE compra_id=?) AND natureza='ignorado'");
-  const reverterParcelas = db.prepare(`
-    UPDATE parcelas SET status = CASE
-      WHEN vencimento IS NOT NULL AND substr(vencimento,1,7) <= substr(date('now'),1,7) THEN 'cobrada'
-      ELSE 'agendada' END
-    WHERE compra_id=? AND status='cancelada'`);
-  const reverterCompra = db.prepare('UPDATE compras SET cancelada=0, cancelada_em=NULL, motivo_cancelamento=NULL WHERE id=?');
-
-  const run = () => {
-    db.exec('BEGIN');
-    try {
-      reverterTx.run(c.id);
-      reverterParcelas.run(c.id);
-      reverterCompra.run(c.id);
-      db.exec('COMMIT');
-    } catch (e) {
-      db.exec('ROLLBACK');
-      throw e;
-    }
-  };
-  run();
-
-  res.json({
-    ok: true,
-    compra_id: c.id,
-    parcelas_revertidas: db.prepare("SELECT COUNT(*) n FROM parcelas WHERE compra_id=? AND status!='cancelada'").get(c.id).n
-  });
-});
-
-// ---------- API: saída mensal (gráfico da visão) ----------
-app.get('/api/extratos/saida-mensal', (req, res) => {
-  const rows = db.prepare(`
-    SELECT substr(data,1,7) mes,
-      SUM(CASE WHEN natureza='gasto' AND parcela IS NOT NULL THEN ABS(valor) ELSE 0 END) fixas,
-      SUM(CASE WHEN natureza='transferencia' THEN ABS(valor) ELSE 0 END) faturas,
-      SUM(CASE WHEN natureza='gasto' AND parcela IS NULL THEN ABS(valor) ELSE 0 END) variavel,
-      SUM(CASE WHEN natureza='transferencia-propria' THEN ABS(valor) ELSE 0 END) praMim
-    FROM transacoes GROUP BY mes ORDER BY mes`).all();
-  res.json(rows);
 });
 
 

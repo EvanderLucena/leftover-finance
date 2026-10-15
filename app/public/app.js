@@ -166,11 +166,12 @@ function barraPeriodo(rootId, storageKey, onChange) {
 }
 
 // ---------- navegação ----------
+const VIEWS = ['visao', 'extratos', 'projecao', 'mes', 'recorrentes', 'reconciliar', 'configurar'];
 document.querySelectorAll('.nav-item[data-view]').forEach(b => b.onclick = () => {
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
-  ['visao', 'extratos', 'projecao', 'mes', 'recorrentes', 'compras', 'importar', 'reconciliar', 'configurar'].forEach(v => document.getElementById('view-' + v).hidden = v !== b.dataset.view);
-  const loaders = { visao: loadVisao, extratos: loadExtratos, projecao: loadProjecao, mes: loadMes, recorrentes: loadRecorrentes, compras: loadCompras, importar: loadImportar, reconciliar: loadReconciliar, configurar: loadConfigurar };
+  VIEWS.forEach(v => document.getElementById('view-' + v).hidden = v !== b.dataset.view);
+  const loaders = { visao: loadVisao, extratos: loadExtratos, projecao: loadProjecao, mes: loadMes, recorrentes: loadRecorrentes, reconciliar: loadReconciliar, configurar: loadConfigurar };
   loaders[b.dataset.view]();
   if (b.dataset.view === 'extratos' && charts.extMeses) {
     setTimeout(() => charts.extMeses?.resize(), 60);
@@ -187,31 +188,93 @@ async function loadMeses() {
   if (emIso.length) MES_MIN = emIso[0];
 }
 
-// ---------- VISÃO GERAL ----------
+// ---------- HOJE: caixa até o fim do mês (saldo real + o que sai + o que entra) ----------
+let hojeDados = null;
 async function loadVisao() {
-  const v = await api('/api/visao');
-  const imp = await api('/api/importacoes/ultima').catch(() => null);
-  document.getElementById('top-sync').textContent = imp ? `dados: ${(imp.data_importacao || '').slice(5, 10)}` : 'sem imports';
-  api('/api/extratos/fontes').then(fontes => {
-    const NOME = { 'itau-conta': 'itaú', 'itau-fatura': 'itaú card', nubank: 'nubank', mercadopago: 'mercadopago', 'auvp-mcp': 'AUVP' };
-    document.getElementById('top-fontes').textContent = fontes.map(f => NOME[f.fonte] || f.fonte).filter((x, i, a) => a.indexOf(x) === i).join(' · ') || 'sem fontes';
-  }).catch(() => {});
-  document.getElementById('top-renda').textContent = fmt(v.renda_mes);
+  const d = await api('/api/hoje').catch(e => ({ erro: e.message }));
+  const hero = document.getElementById('vc-hero');
+  if (d.erro) { hero.innerHTML = `<div class="insight bad"><span class="ico">${ico('x')}</span><div class="txt"><b>Erro:</b> ${d.erro}</div></div>`; return; }
+  hojeDados = d;
+  const btn = document.getElementById('hoje-btn-auvp');
+  btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Atualizando…';
+    try {
+      const r = await api('/api/auvp/sync', { method: 'POST' });
+      toast(r.nucleo && r.nucleo.erro ? 'AUVP: ' + r.nucleo.erro : 'Dados da AUVP atualizados');
+    } catch (e) { toast('Erro ao atualizar: ' + e.message); }
+    btn.disabled = false; btn.textContent = 'Atualizar da AUVP';
+    loadVisao();
+  };
+  document.getElementById('hoje-quando').textContent = 'Caixa até o fim do mês: o que está no banco, o que ainda sai e o que ainda entra. Nada aqui é previsão de gasto.';
+  const dataBR = iso => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) : '—';
+  const sinal = v => (v >= 0 ? '+' : '−') + fmt(Math.abs(v));
+  const fa = d.faturas_abertas || { total: 0, cartoes: [] };
+  const mesFa = fa.mes_referencia ? mesCurto(fa.mes_referencia).toLowerCase() : 'o mês seguinte';
+  hero.innerHTML = `
+    <div class="vc-main">
+      <span class="lbl">NO BANCO AGORA</span>
+      <span class="num ${d.disponivel >= 0 ? 'up' : 'down'}">${fmt(d.disponivel)}</span>
+      <span class="sub muted">${d.saldos_erro ? 'sem saldo da AUVP: ' + d.saldos_erro : 'contas correntes · AUVP ' + (d.saldos_quando || '').slice(0, 16).replace('T', ' ')}</span>
+    </div>
+    <div class="vc-main">
+      <span class="lbl">AINDA SAI ATÉ ${dataBR(d.fim)}</span>
+      <span class="num down">${fmt(d.a_pagar)}</span>
+      <span class="sub muted">${d.contas_a_pagar.length} conta(s) em aberto no mês</span>
+    </div>
+    <div class="vc-main">
+      <span class="lbl">AINDA ENTRA ATÉ ${dataBR(d.fim)}</span>
+      <span class="num up">${fmt(d.a_receber)}</span>
+      <span class="sub muted">${d.rendas_a_receber.length ? d.rendas_a_receber.map(r => r.nome.replace(/^Salário /i, '')).join(' · ') : 'tudo o que ia cair já caiu'}</span>
+    </div>
+    <div class="vc-main ${d.caixa_fim_do_mes >= 0 ? 'sobra' : 'estouro'}">
+      <span class="lbl">CAIXA EM ${dataBR(d.fim)}</span>
+      <span class="num ${d.caixa_fim_do_mes >= 0 ? 'up' : 'down'}">${sinal(d.caixa_fim_do_mes)}</span>
+      <span class="sub muted">depois das faturas de ${mesFa} (${fmt(fa.total)}): <b class="${d.caixa_apos_faturas >= 0 ? 'up' : 'down'}">${sinal(d.caixa_apos_faturas)}</b></span>
+    </div>`;
 
-// Renda caiu no banco real antes da AUVP trazer (ex: TED Cooper) — lançamento manual
-window.lançarRendaManual = async function (pendentes) {
-  const lista = typeof pendentes === 'string' ? JSON.parse(pendentes) : (pendentes || []);
+  // o que ainda sai
+  const hojeIso = d.hoje;
+  document.getElementById('vc-prox-titulo').textContent = d.contas_a_pagar.length ? `${fmt(d.a_pagar)} em ${d.contas_a_pagar.length}` : 'tudo pago';
+  document.getElementById('vc-proximos').innerHTML = d.contas_a_pagar.length
+    ? d.contas_a_pagar.map(p => `
+      <div class="hoje-linha">
+        <span>${p.descricao}${p.valor_origem && p.valor_origem.startsWith('último') ? ` <small class="muted">(${p.valor_origem})</small>` : ''}</span>
+        <span class="muted mono ${p.vencimento < hojeIso ? 'down' : ''}">${dataBR(p.vencimento)}${p.vencimento < hojeIso ? ' · atrasada' : ''}</span>
+        <span class="mono">${fmt(p.valor)}</span>
+      </div>`).join('')
+    : '<div class="muted" style="padding:8px 0;">Nenhuma conta em aberto no mês</div>';
+
+  // o que ainda entra
+  document.getElementById('vc-divida').innerHTML = (d.rendas_a_receber.length
+    ? d.rendas_a_receber.map(r => `
+      <div class="hoje-linha">
+        <span>${r.nome}</span>
+        <span class="muted mono ${r.atrasada ? 'down' : ''}">${dataBR(r.previsto)}${r.atrasada ? ' · não caiu' : ''}</span>
+        <span class="mono up">${fmt(r.valor)}</span>
+      </div>`).join('') + `<button class="ghost" style="margin-top:10px;" onclick="lançarRendaManual()">Caiu e a AUVP ainda não trouxe? Lançar à mão</button>`
+    : '<div class="muted" style="padding:8px 0;">Toda a renda do mês já caiu</div>');
+
+  // faturas que vencem no começo do mês seguinte
+  document.getElementById('vc-faturas').innerHTML = (fa.cartoes || []).map(c => `
+      <div class="hoje-linha" style="cursor:pointer" onclick="abrirModalFaturasAbertas()">
+        <span>${c.icone || ''} ${c.nome || c.id}</span>
+        <span class="muted mono">${dataBR(c.vencimento)}</span>
+        <span class="mono down">${fmt(c.total)}</span>
+      </div>`).join('') || '<div class="muted">Nenhuma fatura aberta</div>';
+  document.getElementById('vc-faturas-tit').textContent = `vencem em ${mesFa} · ${fmt(fa.total)} · compras já lançadas + parcelas programadas`;
+}
+
+// Renda caiu no banco antes de a AUVP trazer: lançamento manual (a sincronização não duplica depois)
+window.lançarRendaManual = async function () {
+  const lista = (hojeDados && hojeDados.rendas_a_receber) || [];
   if (!lista.length) { toast('Nada pendente — todas as rendas deste mês já caíram'); return; }
-  let escolha;
-  if (lista.length === 1) escolha = lista[0].renda_id;
-  else {
-    const opcoes = lista.map((p, i) => `${i + 1}. ${p.nome} (previsto ${fmt(p.estimada)})`).join('\n');
-    const idx = Number(prompt('Qual renda caiu?\n' + opcoes + '\n\nDigite o número:', '1'));
+  let item = lista[0];
+  if (lista.length > 1) {
+    const idx = Number(prompt('Qual renda caiu?\n' + lista.map((p, i) => `${i + 1}. ${p.nome} (previsto ${fmt(p.valor)})`).join('\n') + '\n\nDigite o número:', '1'));
     if (!idx || !lista[idx - 1]) return;
-    escolha = lista[idx - 1].renda_id;
+    item = lista[idx - 1];
   }
-  const item = lista.find(p => p.renda_id === escolha);
-  const valorStr = prompt(`Valor que caiu na conta (${item.nome}):`, String(item.estimada).replace('.', ','));
+  const valorStr = prompt(`Valor que caiu na conta (${item.nome}):`, String(item.valor).replace('.', ','));
   if (valorStr === null) return;
   const valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
   if (!isFinite(valor) || valor <= 0) { toast('Valor inválido'); return; }
@@ -219,179 +282,12 @@ window.lançarRendaManual = async function (pendentes) {
   if (dataStr === null) return;
   const r = await api('/api/rendas/lancar-manual', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ renda_id: escolha, valor, data: dataStr })
+    body: JSON.stringify({ renda_id: item.renda_id, valor, data: dataStr })
   }).catch(e => ({ erro: e.message }));
   if (r.erro) { toast('Erro: ' + r.erro); return; }
-  toast(`✓ ${item.nome} lançado: ${fmt(valor)} em ${dataStr} — renda realizada do mês atualizada`);
+  toast(`${item.nome} lançado: ${fmt(valor)} em ${dataStr}`);
   loadVisao();
 };
-
-  // HERO: como estou agora
-  const pctDia = Math.min(100, Math.round((new Date().getDate() / 30) * 100));
-  const proxIsoLabel = v.mes_iso ? (v.mes_iso.slice(0, 4) + '-' + String(Number(v.mes_iso.slice(5, 7)) % 12 + 1).padStart(2, '0')) : '';
-  const fa = v.faturas_abertas_detalhe || {};
-  const mesFaLabel = mesCurto(fa.mes_referencia || proxIsoLabel).toUpperCase();
-  const cNu = (fa.cartoes || []).find(c => c.instituicao === 'nubank' || (c.id && c.id.includes('nu')))?.total || 0;
-  const cItau = (fa.cartoes || []).find(c => c.instituicao === 'itau' || (c.id && c.id.includes('itau')))?.total || 0;
-  const cMP = (fa.cartoes || []).find(c => c.instituicao === 'mercadopago' || (c.id && c.id.includes('mp')))?.total || 0;
-  const saldoPrevisto = (v.disponivel || 0) + (v.entradas_pendentes || 0) - (v.fatura_proxima || 0);
-  const pendentesDetalhe = v.pendentes_detalhe || [];
-  const pendentes_sub = pendentesDetalhe.length
-    ? pendentesDetalhe.map(p => `${p.nome.replace(/^Salário /i, '')} ${fmt(p.estimada)} (previsto)`).join(' · ')
-    : 'tudo que ia cair neste mês já caiu';
-
-  document.getElementById('vc-hero').innerHTML = `
-    <div class="vc-main">
-      <span class="lbl">DISPONÍVEL NO BANCO</span>
-      <span class="num ${v.disponivel >= 0 ? 'up' : 'down'}">${fmt(v.disponivel)}</span>
-      <span class="sub muted">saldo real nas contas · ${(v.quando || '').slice(0, 16)}</span>
-    </div>
-    <div class="vc-main">
-      <span class="lbl">CONTAS A PAGAR (MÊS)</span>
-      <span class="num down">${fmt(v.contas_a_pagar)}</span>
-      <span class="sub muted">${v.total_contas_pendentes || 0} contas em aberto · faturas já quitadas</span>
-    </div>
-    <div class="vc-main ${(v.saldo_apos_contas || 0) >= 0 ? 'sobra' : 'estouro'}">
-      <span class="lbl">CAIXA LIVRE IMEDIATO</span>
-      <span class="num ${(v.saldo_apos_contas || 0) >= 0 ? 'up' : 'down'}">${(v.saldo_apos_contas || 0) >= 0 ? '+' : ''}${fmt(v.saldo_apos_contas)}</span>
-      <span class="sub muted">disp. (${fmt(v.disponivel)}) − contas a pagar (${fmt(v.contas_a_pagar)})</span>
-    </div>
-    <div class="vc-main ${(v.sobra_mes || 0) >= 0 ? 'sobra' : 'estouro'}">
-      <span class="lbl">SOBRA ESTIMADA DO MÊS</span>
-      <span class="num ${(v.sobra_mes || 0) >= 0 ? 'up' : 'down'}">${(v.sobra_mes || 0) >= 0 ? '+' : ''}${fmt(v.sobra_mes)}</span>
-      <span class="sub muted">renda (${fmt(v.renda_mes)}) − comprometido (${fmt(v.comprometido)}) · igual à projeção</span>
-    </div>
-    <div class="vc-progresso">
-      <div class="lbl">MÊS: ${Math.round(pctDia)}% DECORRIDO</div>
-      <div class="vc-bar"><i style="width:${pctDia}%"></i></div>
-    </div>`;
-
-  // PRÓXIMOS VENCIMENTOS
-  const prox = v.proximos || [];
-  document.getElementById('vc-prox-titulo').textContent = prox.length ? `${prox.length} contas a pagar` : 'tudo pago';
-  document.getElementById('vc-proximos').innerHTML = prox.length
-    ? prox.map(p => `
-      <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); font-size:13.5px;">
-        <span>${p.descricao.slice(0, 28)}</span>
-        <span class="mono" style="color:${p.vencimento < new Date().toISOString().slice(0, 10) ? 'var(--red)' : 'var(--txt)'}">${fmt(p.valor)}</span>
-        <span class="muted mono" style="font-size:12px;">${p.vencimento.slice(5)}</span>
-      </div>`).join('')
-    : '<div class="muted" style="padding:8px 0;">Nenhuma conta em aberto no mês</div>';
-
-  // DÍVIDA PARCELADA
-  document.getElementById('vc-divida').innerHTML = `
-    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px;">
-      <span class="muted">Passivo total a quitar</span><span class="mono">${fmt(v.divida_total)}</span></div>
-    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px;">
-      <span class="muted">Alívio em ≤3 meses</span><span class="mono up">+${fmt(v.alivio_3meses)}</span></div>
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; font-size:14px; cursor:pointer;" onclick="abrirModalFaturasAbertas()" title="Clique para ver faturas abertas">
-      <span class="muted">Faturas abertas (${mesFaLabel})</span>
-      <span class="mono down" style="display:flex; align-items:center; gap:6px;">${fmt(v.fatura_proxima)} <small style="font-size:11px; color:#4dabff;">🔍</small></span>
-    </div>`;
-
-  // FLUXO: Para onde vai cada real
-  const f = v.fluxo || [];
-  const mesNome = v.mes ? mesCurto(v.mes).toUpperCase() : 'MÊS ATUAL';
-  const elMesTit = document.getElementById('flow-mes-titulo');
-  if (elMesTit) elMesTit.textContent = mesNome;
-
-  const cores = { 
-    green: '#00d68f', 
-    blue: '#4dabff', 
-    amber: '#ffb454', 
-    purple: '#b388ff',
-    red: '#ff4d5e'
-  };
-
-  const sobraItem = f.find(r => r.nome.includes('Sobra') || r.nome.includes('Déficit')) || f[f.length - 1];
-  const elStatus = document.getElementById('flow-badge-status');
-  if (elStatus && sobraItem) {
-    if (sobraItem.negativo) {
-      elStatus.innerHTML = `<span class="badge vencido" style="font-size:11px; padding:2px 8px;" title="Total de saídas supera a renda em ${fmt(sobraItem.valor)}">⚠️ ${sobraItem.pct}% da renda</span>`;
-    } else {
-      elStatus.innerHTML = `<span class="badge pago" style="font-size:11px; padding:2px 8px;" title="Sobra livre estimada">✓ ${sobraItem.pct}% livre</span>`;
-    }
-  }
-
-  const elFluxo = document.getElementById('fluxo');
-  if (elFluxo) {
-    elFluxo.innerHTML = f.map((row, i) => {
-      const isRenda = i === 0;
-      const isSobra = row.nome.includes('Sobra') || row.nome.includes('Déficit');
-      const corFundo = cores[row.cor] || 'var(--muted)';
-      const corTexto = isRenda ? 'var(--txt)' : (isSobra ? (row.negativo ? 'var(--red)' : 'var(--green)') : 'var(--txt)');
-      const sinal = isSobra ? (row.negativo ? '−' : '+') : '';
-      const wBar = Math.min(100, Math.max(0, row.pct));
-
-      return `
-        <div class="flow-row" title="${row.detalhe || ''}">
-          <span class="name">
-            <span>${row.icone || '└'}</span>
-            <span style="font-weight:${isRenda || isSobra ? '700' : '500'}; color:${isSobra ? (row.negativo ? 'var(--red)' : 'var(--green)') : 'var(--txt)'};">${row.nome}</span>
-          </span>
-          <div class="flow-bar">
-            <i style="left:0; width:${wBar}%; background:${corFundo}; opacity:${isRenda ? '0.2' : (isSobra ? '0.85' : '0.8')};"></i>
-            <span class="pct-label">${row.pct}%</span>
-          </div>
-          <div class="amt">
-            <span style="color:${corTexto};">${sinal}${fmt(row.valor)}</span>
-          </div>
-        </div>`;
-    }).join('');
-  }
-
-  // Rodapé do fluxo com barra segmentada empilhada
-  const elRodape = document.getElementById('flow-resumo-rodape');
-  if (elRodape && f.length >= 4) {
-    const fix = f.find(r => r.nome.includes('Fixos')) || { pct: 0, valor: 0 };
-    const fat = f.find(r => r.nome.includes('Faturas')) || { pct: 0, valor: 0 };
-    const par = f.find(r => r.nome.includes('Parcelas')) || { pct: 0, valor: 0 };
-    const varG = f.find(r => r.nome.includes('Gasto')) || { pct: 0, valor: 0 };
-    const totSaidas = fix.valor + fat.valor + par.valor + varG.valor;
-    const pctTotal = Math.round((totSaidas / (f[0].valor || 1)) * 100);
-
-    elRodape.innerHTML = `
-      <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--line);">
-        <div style="display:flex; height:6px; border-radius:3px; overflow:hidden; gap:2px; margin-bottom:8px; background:rgba(255,255,255,0.04);" title="Distribuição do Comprometimento">
-          <div style="width:${Math.min(100, fix.pct)}%; background:var(--blue);" title="Fixos: ${fix.pct}% (${fmt(fix.valor)})"></div>
-          <div style="width:${Math.min(100, fat.pct)}%; background:#ff4d5e;" title="Faturas: ${fat.pct}% (${fmt(fat.valor)})"></div>
-          <div style="width:${Math.min(100, par.pct)}%; background:var(--amber);" title="Parcelas: ${par.pct}% (${fmt(par.valor)})"></div>
-          <div style="width:${Math.min(100, varG.pct)}%; background:#b388ff;" title="Gasto dia a dia: ${varG.pct}% (${fmt(varG.valor)})"></div>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--muted); flex-wrap:wrap; gap:6px;">
-          <span>Comprometido: <b style="color:var(--txt);">${fmt(totSaidas)}</b> <span class="mono" style="font-size:11px;">(${pctTotal}% da renda)</span></span>
-          <span>${sobraItem?.negativo ? `<b style="color:var(--red);">Déficit: −${fmt(sobraItem.valor)}</b>` : `<b style="color:var(--green);">Sobra: +${fmt(sobraItem?.valor || 0)}</b>`}</span>
-        </div>
-      </div>`;
-  }
-
-  // DÍVIDAS EM ANDAMENTO
-  const dividas = await api('/api/dividas');
-  document.getElementById('dividas').innerHTML = (dividas.emAndamento || []).slice(0, 9).map(d => `
-    <tr>
-      <td>${d.descricao.slice(0, 32)}</td>
-      <td class="mono">${d.restam}x ${fmt(d.valor)}</td>
-      <td><div class="progress"><i style="width:${d.pct}%"></i></div></td>
-      <td class="${d.restam <= 2 ? 'up' : 'muted'}">${d.termina}</td>
-    </tr>`).join('');
-
-  // INSIGHTS
-  const metaEl = document.getElementById('insights-meta');
-  if (metaEl) {
-    if (v.insights_ia_gerado_em) {
-      const dt = new Date(v.insights_ia_gerado_em);
-      const dataHora = dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' às ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      metaEl.textContent = `· gerado em ${dataHora} via DeepSeek`;
-    } else if (v.insights_fonte === 'regras') {
-      metaEl.textContent = '· regras locais';
-    } else {
-      metaEl.textContent = '';
-    }
-  }
-  document.getElementById('insights').innerHTML = (v.insights || []).map(i =>
-    `<div class="insight ${i.tipo}"><span class="ico">${i.icone}</span><div class="txt"><b>${i.titulo}</b><span>${i.texto}</span></div></div>`
-  ).join('') || '<div class="muted">Sem insights ainda</div>';
-}
 
 function chartOpts() {
   return {
@@ -672,45 +568,7 @@ async function carregarTransacoes() {
 
 function renderizarCockpitKPIs(resumo, rows) {
   if (!resumo) return;
-  const saldos = resumo.saldos || {};
   const totais = resumo.totais || {};
-
-  const elDisp = document.getElementById('ext-global-disponivel');
-  if (elDisp) elDisp.textContent = fmt(saldos.saldo_disponivel ?? 0);
-
-  const elFat = document.getElementById('ext-global-faturas');
-  if (elFat) elFat.textContent = fmt(saldos.faturas_abertas ?? 0);
-
-  const elContaSaldo = document.getElementById('ext-conta-saldo');
-  const elContaLabel = document.getElementById('ext-kpi-conta-label');
-  const elContaQuando = document.getElementById('ext-conta-quando');
-
-  if (elContaSaldo && elContaLabel) {
-    if (extFiltros.conta === 'todas') {
-      elContaLabel.textContent = 'SALDO LÍQUIDO CONSOLIDADO';
-      const liq = saldos.saldo_liquido ?? 0;
-      elContaSaldo.textContent = fmt(liq);
-      elContaSaldo.style.color = liq >= 0 ? 'var(--green)' : 'var(--red)';
-      if (elContaQuando) elContaQuando.textContent = 'bancos − faturas abertas';
-    } else {
-      const ctas = saldos.contas || [];
-      const cfgNomeMap = {
-        itau: 'Itaú conta',
-        nubank_conta: 'Nubank conta',
-        btg: 'BTG Banking',
-        nubank_cartao: 'Nubank (gold)',
-        mp_cartao: 'Mercado Pago',
-        itau_cartao: 'Itaú Visa Signature'
-      };
-      const alvoNome = cfgNomeMap[extFiltros.conta] || extFiltros.conta;
-      const cta = ctas.find(c => c.nome === alvoNome) || ctas.find(c => c.nome.toLowerCase().includes(extFiltros.conta.toLowerCase()));
-      const saldoCta = cta ? cta.valor : 0;
-      elContaLabel.textContent = `${(cta?.nome || extFiltros.conta).toUpperCase()}`;
-      elContaSaldo.textContent = fmt(saldoCta);
-      elContaSaldo.style.color = saldoCta >= 0 ? 'var(--green)' : 'var(--red)';
-      if (elContaQuando) elContaQuando.textContent = cta?.tipo === 'CREDIT' ? 'fatura em aberto' : 'saldo real corrente';
-    }
-  }
 
   const elFluxoRes = document.getElementById('ext-kpi-resultado');
   const elFluxoDet = document.getElementById('ext-kpi-detalhe-fluxo');
@@ -1954,81 +1812,7 @@ document.getElementById('form-rec').onsubmit = async e => {
   toast('Recorrência salva com sucesso');
 };
 
-// ---------- COMPRAS (fase 4 — fonte de verdade única) ----------
-async function loadCompras() {
-  const busca = document.getElementById('comp-busca').value.trim();
-  const status = document.getElementById('comp-status').value;
-  let url = '/api/compras?';
-  if (busca) url += 'busca=' + encodeURIComponent(busca) + '&';
-  if (status) url += 'status=' + status + '&';
-  const compras = await api(url).catch(() => []);
-  const tb = document.querySelector('#tbl-compras tbody');
-  const resumo = document.getElementById('comp-resumo');
-  resumo.textContent = `${compras.length} compras`;
-  tb.innerHTML = compras.map(c => {
-    const pct = c.n_parcelas ? Math.round(c.cobradas / c.n_parcelas * 100) : 0;
-    const paralela = !!c.tem_paralela;
-    const evs = c.evidencias ?? c['evidências'] ?? 0;
-    const nomeExib = c.descricao_original || c.estabelecimento;
-    return `<tr style="cursor:pointer" ondblclick="abrirCompra(${c.id})" title="duplo-clique pra ver detalhes">
-      <td><b>${nomeExib}</b>${c.descricao_original && c.descricao_original !== c.estabelecimento ? ` <span class="muted" style="font-size:11px; font-weight:normal;">(${c.estabelecimento})</span>` : ''}${paralela ? ' <span class="badge" style="font-size:10px; background:rgba(255,193,7,0.15); color:#d97706; border:1px solid rgba(255,193,7,0.3);" title="Existe outra compra no mesmo estabelecimento com valor similar">paralela</span>' : ''}</td>
-      <td class="mono">${fmt(c.valor_parcela)}</td>
-      <td class="muted">${c.cobradas}/${c.n_parcelas}${c.agendadas ? ` <span class="muted" style="font-size:11px;">(+${c.agendadas} agend.)</span>` : ''}</td>
-      <td class="muted">${c.mes_inicio || '—'}</td>
-      <td class="muted">${(c.fonte_origem || '').replace('itau-fatura', 'Itaú').replace('nubank', 'Nubank').replace('mercadopago', 'MP').replace('auvp-mcp', 'AUVP')}</td>
-      <td><div class="progress" style="width:100px;"><i style="width:${Math.min(100, pct)}%"></i></div></td>
-      <td class="muted">${evs}</td>
-      <td><button class="ghost" style="padding:4px 10px; font-size:12px;" onclick="event.stopPropagation(); abrirCompra(${c.id})">ver</button></td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="8" class="muted" style="text-align:center; padding:30px;">Nenhuma compra parcelada encontrada</td></tr>';
-}
-window.abrirCompra = async function (id) {
-  const c = await api('/api/compras/' + id).catch(() => null);
-  if (!c) return;
-  document.getElementById('comp-dlg-titulo').textContent = `${c.estabelecimento} — ${c.n_parcelas}x de ${fmt(c.valor_parcela)}`;
-  const evs = c.evidencias ?? c['evidências'] ?? (c.transacoes ? c.transacoes.length : 0);
-  const parcelas = c.parcelas.map(p => {
-    const txs = (c.transacoes || []).filter(t => t.parcela_id === p.id);
-    const statusLbl = p.status === 'cancelada' ? '<span class="muted" style="text-decoration:line-through; width:75px; text-transform:uppercase; font-size:11px; font-weight:600;">cancelada</span>' : `<span class="${p.status === 'cobrada' ? 'up' : 'muted'}" style="width:75px; text-transform:uppercase; font-size:11px; font-weight:600;">${p.status}</span>`;
-    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; ${p.status === 'cancelada' ? 'opacity:.55;' : ''}">
-      <span class="mono" style="width:45px;">${p.n}/${c.n_parcelas}</span>
-      <span class="mono" style="width:80px;">${p.vencimento || '—'}</span>
-      ${statusLbl}
-      <span class="muted" style="font-size:11.5px; flex:1; text-align:right;">${txs.map(t => `${(t.fonte || '').replace('itau-fatura', 'Itaú').replace('nubank', 'Nubank').replace('mercadopago', 'MP').replace('auvp-mcp', 'AUVP')} (${t.data.slice(5)})`).join(' · ') || '<span style="opacity:0.5">sem transação direta</span>'}</span>
-    </div>`;
-  }).join('');
-  const btnCancelar = c.cancelada
-    ? `<button type="button" class="ghost" onclick="reverterCancelamentoCompra(${c.id})" style="color:var(--green);">↩ Reverter cancelamento</button>`
-    : `<button type="button" class="ghost" onclick="cancelarCompra(${c.id})" style="color:#e5484d;">✕ Cancelar compra (estorno)</button>`;
-  document.getElementById('comp-dlg-corpo').innerHTML = `
-    <div class="muted" style="margin-bottom:14px; font-size:12.5px;">Início: <b>${c.mes_inicio || '—'}</b> · Fonte original: <b>${c.fonte_origem || '—'}</b> · <b>${evs}</b> evidências vinculadas${c.cancelada ? ` · <b style="color:#e5484d;">CANCELADA em ${(c.cancelada_em || '').slice(0, 10)}</b>${c.motivo_cancelamento ? ' — ' + c.motivo_cancelamento : ''}` : ''}</div>
-    <div style="max-height:380px; overflow-y:auto;">${parcelas}</div>
-    <div style="margin-top:12px;">${btnCancelar}</div>`;
-  document.getElementById('dlg-compra').showModal();
-};
-
-window.cancelarCompra = async function (id) {
-  const motivo = prompt('Motivo do cancelamento (ex: estorno Mercado Livre, compra cancelada):', 'Compra cancelada / estornada');
-  if (motivo === null) return;
-  const r = await api('/api/compras/' + id + '/cancelar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motivo }) }).catch(e => ({ erro: e.message }));
-  if (r.erro) { toast('Erro: ' + r.erro); return; }
-  toast(`Compra cancelada: ${r.parcelas_canceladas} parcelas fora da projeção, ${r.transacoes_ignoradas} evidência(s) arquivada(s)`);
-  document.getElementById('dlg-compra').close();
-  loadCompras();
-};
-
-window.reverterCancelamentoCompra = async function (id) {
-  if (!confirm('Reverter cancelamento? As parcelas voltam pra projeção e as evidências reativam.')) return;
-  const r = await api('/api/compras/' + id + '/reverter-cancelamento', { method: 'POST' }).catch(e => ({ erro: e.message }));
-  if (r.erro) { toast('Erro: ' + r.erro); return; }
-  toast('Cancelamento revertido');
-  document.getElementById('dlg-compra').close();
-  loadCompras();
-};
-document.getElementById('comp-busca').oninput = e => { clearTimeout(window._compT); window._compT = setTimeout(loadCompras, 300); };
-document.getElementById('comp-status').onchange = loadCompras;
-
-// ---------- IMPORTAR ----------
+// ---------- IMPORTAR PDF (opcional, dentro de Configurar) ----------
 async function loadImportar() {
   const hist = await api('/api/importacoes/historico').catch(() => []);
   document.getElementById('imp-hist').innerHTML = hist.slice(0, 14).map(h =>
@@ -2251,7 +2035,7 @@ document.getElementById('file-pdf').onchange = async e => {
   toast('Importação concluída — confira as sugestões em Reconciliar');
 };
 
-// ---------- CONFIGURAR (IA) ----------
+// ---------- CONFIGURAR ----------
 // drill-down: Raio-X 360 do mês (clique na barra da projeção)
 window.abrirDrillParcelas = async function (mes) {
   let d = await api('/api/projecao/detalhe/' + mes).catch(() => null);
@@ -2406,7 +2190,7 @@ window.verNoExtrato = function (desc) {
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
   const btn = document.querySelector('.nav-item[data-view="extratos"]');
   if (btn) btn.classList.add('active');
-  ['visao', 'extratos', 'projecao', 'mes', 'recorrentes', 'compras', 'importar', 'reconciliar', 'configurar'].forEach(v => {
+  VIEWS.forEach(v => {
     const el = document.getElementById('view-' + v);
     if (el) el.hidden = v !== 'extratos';
   });
@@ -2428,16 +2212,11 @@ window.verNoExtrato = function (desc) {
 };
 
 window.verNoExtratoCartao = function (cartaoId) {
-  const mapaConta = {
-    nubank: 'nubank_cartao',
-    itau: 'itau_cartao',
-    mercadopago: 'mp_cartao'
-  };
-  const conta = mapaConta[cartaoId] || 'todas';
+  const conta = cartaoId || 'todas'; // id da conta local do cartão (core/comprometido.js)
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
   const btn = document.querySelector('.nav-item[data-view="extratos"]');
   if (btn) btn.classList.add('active');
-  ['visao', 'extratos', 'projecao', 'mes', 'recorrentes', 'compras', 'importar', 'reconciliar', 'configurar'].forEach(v => {
+  VIEWS.forEach(v => {
     const el = document.getElementById('view-' + v);
     if (el) el.hidden = v !== 'extratos';
   });
@@ -2785,16 +2564,11 @@ if (document.getElementById('modal-conta-salvar')) {
 }
 
 async function loadConfigurar() {
+  loadImportar(); // histórico de PDFs (painel opcional)
   // Contas e Cartões
   const todasContas = await api('/api/contas?todas=1').catch(() => []);
   renderContasConfig(todasContas);
 
-  const cfg = await api('/api/config/ia').catch(() => ({}));
-  document.getElementById('cfg-ia-url').value = cfg.url || '';
-  document.getElementById('cfg-ia-model').value = cfg.model || '';
-  document.getElementById('cfg-ia-key').value = '';
-  document.getElementById('cfg-ia-key').placeholder = cfg.temKey ? '•••••••• (salva — digite pra trocar)' : 'cole sua api key aqui';
-  document.getElementById('cfg-ia-status').textContent = cfg.temKey ? 'configurada' : 'não configurada';
   // rendas (movedas da Projeção)
   const proj = await api('/api/projecao').catch(() => ({}));
   await renderRendasConfig(proj.rendas || []);
@@ -2810,27 +2584,6 @@ async function loadConfigurar() {
     ? `Último sync: ${(auvp.ultimo_sync || '').slice(0, 16)} · ${TIPO_SYNC[auvp.ultimo_tipo] || auvp.ultimo_tipo} · o automático roda 1x/dia com o servidor aberto`
     : 'Nunca sincronizou — clique em "Sincronizar agora"';
 }
-document.getElementById('cfg-ia-salvar').onclick = async () => {
-  const url = document.getElementById('cfg-ia-url').value;
-  const key = document.getElementById('cfg-ia-key').value;
-  const model = document.getElementById('cfg-ia-model').value;
-  await api('/api/config/ia', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, key: key || undefined, model }) });
-  toast('Configuração salva');
-  loadConfigurar();
-};
-document.getElementById('cfg-ia-testar').onclick = async () => {
-  const st = document.getElementById('cfg-ia-status');
-  st.textContent = 'testando…';
-  st.style.color = 'var(--muted)';
-  const d = await api('/api/config/ia/testar', { method: 'POST' }).catch(e => ({ ok: false, erro: e.message }));
-  if (d.ok) {
-    st.textContent = 'conectada — respondeu: ' + (d.resposta || 'ok').slice(0, 20);
-    st.style.color = 'var(--green)';
-  } else {
-    st.textContent = (d.erro || 'falhou');
-    st.style.color = 'var(--red)';
-  }
-};
 
 // AUVP
 document.getElementById('cfg-auvp-salvar').onclick = async () => {
@@ -2874,7 +2627,7 @@ function atualizarBtnPriv() {
 }
 function reRenderAtiva() {
   const ativa = document.querySelector('.nav-item.active')?.dataset.view;
-  const mapa = { visao: loadVisao, extratos: loadExtratos, projecao: loadProjecao, mes: loadMes, recorrentes: loadRecorrentes, compras: loadCompras, importar: loadImportar, reconciliar: loadReconciliar, configurar: loadConfigurar };
+  const mapa = { visao: loadVisao, extratos: loadExtratos, projecao: loadProjecao, mes: loadMes, recorrentes: loadRecorrentes, reconciliar: loadReconciliar, configurar: loadConfigurar };
   if (ativa && mapa[ativa]) mapa[ativa]();
 }
 if (btnPriv) {
@@ -2896,28 +2649,6 @@ if (window.Chart) {
   Chart.defaults.font.weight = '600';
   Chart.defaults.color = '#a8bcd2';
 }
-const _btnAtualizarIA = document.getElementById('btn-atualizar-insights-ia');
-if (_btnAtualizarIA) {
-  _btnAtualizarIA.onclick = async () => {
-    _btnAtualizarIA.disabled = true;
-    _btnAtualizarIA.innerHTML = '<span class="spin">⏳</span> <span>Analisando…</span>';
-    try {
-      const res = await api('/api/insights/gerar', { method: 'POST' });
-      if (res.ok) {
-        toast('Diagnóstico com IA atualizado!');
-        loadVisao();
-      } else {
-        toast('Erro ao gerar insights: ' + (res.erro || 'falha na IA'));
-      }
-    } catch (err) {
-      toast('Erro ao comunicar com IA: ' + err.message);
-    } finally {
-      _btnAtualizarIA.disabled = false;
-      _btnAtualizarIA.innerHTML = '<span>🪄 Atualizar com IA</span>';
-    }
-  };
-}
-
 const perExtratos = barraPeriodo('per-bar-extratos', 'finflow.per.extratos', () => carregarTransacoes());
 // topo: quando os dados da AUVP foram atualizados (antes vinha da Visão, que saiu do menu)
 async function atualizarTopo() {

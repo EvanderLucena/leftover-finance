@@ -537,3 +537,41 @@ canvas { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale
 /* atributo hidden sempre vence (abas fora do menu, seções escondidas) */
 [hidden] { display: none !important; }
 @media (max-width: 900px) { .proj-hero { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- aba Hoje ---------- */
+.hoje-topo { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; }
+.hoje-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.hoje-linha > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.tabela-rolavel { overflow-x: auto; }
+
+/* ---------- celular (até 760px): menu embaixo, uma coluna, tabelas rolam dentro do painel ---------- */
+@media (max-width: 760px) {
+  body { font-size: 14px; }
+  .topbar { padding: 10px 12px; gap: 8px; flex-wrap: nowrap; }
+  #top-sync { font-size: 11px; padding: 3px 8px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .logo { font-size: 14px; gap: 6px; flex-shrink: 0; }
+  .topbar .logo { font-size: 15px; }
+  #top-fontes, #top-renda { display: none; }
+  .layout { display: block; min-height: 0; }
+  .sidebar {
+    position: fixed; bottom: 0; left: 0; right: 0; top: auto; height: auto; z-index: 60;
+    display: flex; gap: 4px; overflow-x: auto; padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    border-right: none; border-top: 1px solid var(--line);
+  }
+  .sidebar .section { display: none; }
+  .nav-item { flex: 0 0 auto; margin: 0; padding: 9px 12px; font-size: 13px; gap: 6px; white-space: nowrap; }
+  .nav-item.active { border-left: none; border-bottom: 2px solid var(--green); }
+  .content { padding: 12px 12px 84px; }
+  .panel { padding: 14px; border-radius: 12px; overflow-x: auto; }
+  .panel h4 { flex-wrap: wrap; gap: 6px; }
+  .grid, .g2, .g23, .vc-hero, .proj-hero, .ph-side, .rec-summary, .ext-analytics-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .ph-main .num { font-size: 28px; }
+  table { font-size: 13px; }
+  dialog { min-width: 0; width: calc(100vw - 24px); max-width: calc(100vw - 24px); padding: 18px 16px; }
+  .hoje-linha { grid-template-columns: minmax(0, 1fr) auto; }
+  .hoje-linha > span:nth-child(2) { grid-row: 2; font-size: 12px; }
+  .camadas-row { flex-wrap: wrap; }
+  #p-contas-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .cmes-conta { flex-direction: column; align-items: stretch; }
+  input, select, textarea, button { font-size: 16px; } /* evita o zoom automático do iPhone ao focar */
+}

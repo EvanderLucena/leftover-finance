@@ -1,11 +1,11 @@
-// Fase 4 — Sync diário automático: roda no server, guard de 24h em config
-// Sync leve (contas + agendadas) 1x/dia enquanto o servidor estiver aberto.
-// NUNCA insere transação: só registra novidade em sincronizacoes_auvp pra
-// badge de "pendências" na UI. Inserção continua sendo 100% manual (regra do usuário).
+// Sincronização automática com a AUVP enquanto o servidor estiver aberto (só leitura na AUVP).
+// Desde 15/10/2026 roda o fluxo completo do núcleo (core/auvp-sync.js): transações, faturas oficiais e saldos,
+// e depois a conciliação automática pela regra única (só o que é certo e sem ambiguidade).
 const db = require('../db');
 const auvpClient = require('./auvp-client');
 
-const INTERVALO_CHECK = 30 * 60 * 1000; // checa a cada 30min se passaram 24h
+const INTERVALO_CHECK = 30 * 60 * 1000; // checa a cada 30min
+const INTERVALO_SYNC = 6 * 3600 * 1000;  // sincroniza a cada 6h
 
 function ultimaSync() {
   const r = db.prepare("SELECT valor FROM config WHERE chave='ultima_sync_auvp'").get();
@@ -15,20 +15,23 @@ function ultimaSync() {
 async function syncDiario() {
   const { ativo, url, key } = auvpClient.cfgAUVP();
   if (!ativo || !url || !key) return;
-  if (Date.now() - ultimaSync() < 24 * 3600 * 1000) return; // guard 24h
+  if (Date.now() - ultimaSync() < INTERVALO_SYNC) return;
   try {
-    const [contas, agendadas] = await Promise.all([auvpClient.pullContas(), auvpClient.pullAgendadas()]);
+    const r = await require('../core/auvp-sync').sincronizarAUVP();
+    const { autoConciliarMes } = require('./conciliacao');
+    const ref = db.prepare("SELECT valor FROM config WHERE chave='mes_atual'").get();
+    const auto = autoConciliarMes(ref ? ref.valor : null);
     db.prepare(`INSERT INTO sincronizacoes_auvp (tipo, resultados) VALUES ('auto', ?)`)
-      .run(JSON.stringify({ contas: contas.resumo, agendadas: agendadas.length, origem: 'sync-diario' }));
-    db.prepare("UPDATE config SET valor=datetime('now') WHERE chave='ultima_sync_auvp'").run();
-    console.log('[sync-diario] AUVP ok:', contas.resumo?.totalContas ?? '?', 'contas,', agendadas.length, 'agendadas');
+      .run(JSON.stringify({ origem: 'sync-automatico', ...r, auto_conciliados: auto.conciliados }));
+    db.prepare("INSERT INTO config (chave, valor) VALUES ('ultima_sync_auvp', datetime('now')) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor").run();
+    console.log('[sync-automatico] AUVP ok:', r.transacoes_novas, 'transação(ões) nova(s),', auto.conciliados, 'conta(s) conciliada(s)');
   } catch (e) {
-    console.log('[sync-diario] falhou (sem crash):', e.message.slice(0, 120));
+    console.log('[sync-automatico] falhou (sem crash):', e.message.slice(0, 120));
   }
 }
 
 function iniciarSyncDiario() {
-  // primeira checagem 1min após boot, depois a cada 30min
+  // primeira checagem 1min após o boot, depois a cada 30min
   setTimeout(() => { syncDiario(); setInterval(syncDiario, INTERVALO_CHECK); }, 60 * 1000);
 }
 

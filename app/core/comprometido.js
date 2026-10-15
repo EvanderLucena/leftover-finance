@@ -327,4 +327,53 @@ function atualizarLancamentosDeFatura(hoje = cal.hojeISO()) {
   return mudou;
 }
 
-module.exports = { comprometidoMes, serie, faturasAbertas, faturasDoMes, faturasDoCartao, contasDoMes, rendaDoMes, dividas, parcelaNoMes, entraNoMes, atualizarLancamentosDeFatura, baseDescricao };
+// ---------- caixa até o fim do mês (aba Hoje) ----------
+// Visão de caixa, complementar à competência da Projeção: o que já está no banco, o que ainda sai e o que ainda cai
+// até o último dia do mês corrente. Tudo real ou agendado (regra de 15/10/2026); nenhuma previsão de gasto.
+// disponivel: saldo das contas correntes, vindo da AUVP (quem chama informa)
+function caixaAteFimDoMes(disponivel, hoje = cal.hojeISO()) {
+  const ym = hoje.slice(0, 7);
+  const fim = cal.diaDoMes(ym, 31);
+  const m = comprometidoMes(ym, hoje);
+  const mes = db.prepare('SELECT id FROM meses WHERE ref=?').get(cal.ymParaRef(ym));
+
+  // a pagar: contas do mês em aberto (valor do motor) + faturas do mês ainda não pagas
+  const aPagar = m.contas.filter(c => !c.pago).map(c => ({ descricao: c.descricao, valor: c.valor, vencimento: c.vencimento, tipo: c.tipo, valor_origem: c.valor_origem }));
+  const faturasLanc = mes ? db.prepare(`SELECT l.descricao, l.valor, l.vencimento, l.pago FROM lancamentos l JOIN categorias c ON c.id = l.categoria_id
+    WHERE l.mes_id = ? AND c.nome = 'Cartões'`).all(mes.id) : [];
+  if (faturasLanc.length) {
+    for (const f of faturasLanc.filter(f => !f.pago)) aPagar.push({ descricao: f.descricao, valor: r2(Math.abs(f.valor)), vencimento: f.vencimento, tipo: 'fatura' });
+  } else {
+    for (const f of m.faturas.filter(f => f.vencimento >= hoje)) aPagar.push({ descricao: 'Fatura ' + f.cartao, valor: f.total, vencimento: f.vencimento, tipo: 'fatura' });
+  }
+  aPagar.sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+
+  // a receber: renda que ainda cai no caixa deste mês (pela data em que o dinheiro entra, não pela competência)
+  const creditos = db.prepare(`SELECT data, valor, descricao FROM transacoes WHERE valor > 0 AND natureza IN ('salario','entrada','entrada-outra')
+    AND data >= ? AND data <= ?`).all(ym + '-01', fim);
+  const estimadas = new Map([...rendaDoMes(ym).itens, ...rendaDoMes(cal.addMes(ym, 1)).itens].map(i => [i.id, i.estimada]));
+  const aReceber = [];
+  for (const r of db.prepare('SELECT * FROM rendas WHERE ativo=1').all()) {
+    const casa = t => (r.valor_exato != null ? Math.abs(t.valor - r.valor_exato) < 0.005 : (r.padrao_regex ? new RegExp(r.padrao_regex, 'i').test(t.descricao) : false));
+    // quem tem corte de competência recebe no fim do mês (último dia útil); os demais no dia de pagamento
+    const previsto = r.competencia_corte ? cal.ultimoDiaUtil(ym) : cal.diaDoMes(ym, r.dia_pagamento || 5);
+    const jaCaiu = creditos.some(t => casa(t) && (!r.competencia_corte || +t.data.slice(8, 10) >= r.competencia_corte));
+    if (!jaCaiu) aReceber.push({ renda_id: r.id, nome: r.nome, valor: estimadas.get(r.id) || 0, previsto, atrasada: previsto < hoje });
+  }
+
+  const totPagar = r2(aPagar.reduce((s, x) => s + x.valor, 0));
+  const totReceber = r2(aReceber.reduce((s, x) => s + x.valor, 0));
+  const fa = faturasAbertas(hoje);
+  return {
+    mes: m.mes, mes_iso: ym, hoje, fim,
+    disponivel: r2(disponivel), a_pagar: totPagar, a_receber: totReceber,
+    caixa_fim_do_mes: r2(disponivel + totReceber - totPagar),
+    contas_a_pagar: aPagar, rendas_a_receber: aReceber,
+    dia_a_dia_no_mes: m.dia_a_dia,
+    faturas_abertas: fa,
+    // as faturas abertas vencem logo no começo do mês seguinte: o caixa depois delas é o número que importa
+    caixa_apos_faturas: r2(disponivel + totReceber - totPagar - fa.total)
+  };
+}
+
+module.exports = { caixaAteFimDoMes, comprometidoMes, serie, faturasAbertas, faturasDoMes, faturasDoCartao, contasDoMes, rendaDoMes, dividas, parcelaNoMes, entraNoMes, atualizarLancamentosDeFatura, baseDescricao };

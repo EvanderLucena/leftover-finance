@@ -20,88 +20,52 @@
 
 <div class="layout">
   <aside class="sidebar">
-    <div class="nav-item" data-view="visao" hidden>◎ Visão geral</div>
-    <div class="nav-item" data-view="extratos" hidden>▤ Extratos</div>
+    <div class="nav-item" data-view="visao">◎ Hoje</div>
     <div class="nav-item active" data-view="projecao">◉ Projeção</div>
     <div class="section">OPERAÇÃO</div>
     <div class="nav-item" data-view="mes">☐ Contas do mês</div>
     <div class="nav-item" data-view="recorrentes">⏱ Recorrentes</div>
     <div class="section">DADOS</div>
-    <div class="nav-item" data-view="compras" hidden>◈ Compras</div>
-    <div class="nav-item" data-view="importar" hidden>⬆ Importar</div>
     <div class="nav-item" data-view="reconciliar">🔄 Reconciliar</div>
+    <div class="nav-item" data-view="extratos">▤ Transações</div>
     <div class="nav-item" data-view="configurar">⚙ Configurar</div>
   </aside>
 
   <main class="content">
-    <!-- ================= VISÃO GERAL ================= -->
+    <!-- ================= HOJE ================= -->
     <section id="view-visao" hidden>
-      <!-- hero: como estou agora -->
+      <!-- caixa até o fim do mês: saldo real + o que sai + o que entra -->
+      <div class="hoje-topo"><span class="muted" id="hoje-quando"></span><button class="ghost" id="hoje-btn-auvp">Atualizar da AUVP</button></div>
       <div class="vc-hero" id="vc-hero"></div>
-
-      <!-- linha 2: contexto rápido -->
-      <div class="grid g23" style="margin-bottom:12px;">
+      <div class="grid g2" style="margin-bottom:12px;">
         <div class="panel">
-          <h4>PRÓXIMOS VENCIMENTOS <span class="muted" style="font-size:10px; text-transform:none" id="vc-prox-titulo"></span></h4>
+          <h4>AINDA SAI NESTE MÊS <span class="muted" style="font-size:11px; text-transform:none; letter-spacing:0" id="vc-prox-titulo"></span></h4>
           <div id="vc-proximos"></div>
         </div>
         <div class="panel">
-          <h4>DÍVIDA PARCELADA <span class="muted" style="font-size:10px; text-transform:none">restante + alívio</span></h4>
+          <h4>AINDA ENTRA NESTE MÊS</h4>
           <div id="vc-divida"></div>
         </div>
       </div>
-
-      <!-- linha 3: análises -->
-      <div class="grid g23">
-        <div class="panel">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
-            <h4 style="margin:0; letter-spacing:.5px;">PARA ONDE VAI CADA REAL — <span id="flow-mes-titulo" style="color:var(--txt);">MÊS ATUAL</span>
-              <span class="muted" style="font-size:10px; font-weight:400; text-transform:none; letter-spacing:0;" title="Visão caixa: tudo o que sai da conta no mês, uma vez só. Fixos/faturas/parcelas vêm das contas do mês (mesma fonte da Projeção); boletos que pagam essas contas não contam 2x. Compras no crédito entram na fatura, não no dia a dia.">visão caixa · boleto pago = conta quitada (1x só) · mesma fonte da projeção</span></h4>
-            <div id="flow-badge-status"></div>
-          </div>
-          <div class="flow" id="fluxo"></div>
-          <div id="flow-resumo-rodape"></div>
-        </div>
-        <div class="panel">
-          <h4>DÍVIDAS EM ANDAMENTO <span class="muted" style="font-size:10px; text-transform:none">ordenado por término</span></h4>
-          <table><thead><tr><th>Quem</th><th>Resta</th><th>Progresso</th><th>Termina</th></tr></thead><tbody id="dividas"></tbody></table>
-        </div>
-      </div>
-      <div class="panel" style="margin-top:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-          <h4 style="margin:0;">DIAGNÓSTICO FINANCEIRO & INSIGHTS <span class="muted" style="font-size:11px; text-transform:none; font-weight:normal;" id="insights-meta"></span></h4>
-          <button class="ghost" id="btn-atualizar-insights-ia" style="padding:4px 10px; font-size:12px; display:flex; align-items:center; gap:6px;" title="Recalcular diagnóstico inteligente com DeepSeek">
-            <span>🪄 Atualizar com IA</span>
-          </button>
-        </div>
-        <div id="insights"></div>
+      <div class="panel">
+        <h4>FATURAS ABERTAS <span class="muted" style="font-size:11px; text-transform:none; letter-spacing:0" id="vc-faturas-tit"></span></h4>
+        <div id="vc-faturas"></div>
       </div>
     </section>
 
-    <!-- ================= EXTRATOS ================= -->
     <section id="view-extratos" hidden>
       <!-- 1. Cockpit Header: Seletor de Conta & Saldos em Tempo Real -->
       <div class="panel" style="margin-bottom:12px; padding:16px 20px;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:14px;">
           <div>
             <h4 style="margin:0; display:flex; align-items:center; gap:8px;">
-              <span>▤ EXTRATO & LIVRO-RAZÃO FINANCEIRO</span>
-              <span class="muted" style="font-size:11.5px; text-transform:none; letter-spacing:0; font-weight:normal;">auditoria completa de movimentações, saldos correntes e conciliação bancária</span>
+              <span>▤ TRANSAÇÕES</span>
+              <span class="muted" style="font-size:11.5px; text-transform:none; letter-spacing:0; font-weight:normal;">tudo o que entrou e saiu, por conta, categoria e período</span>
             </h4>
           </div>
           <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <select class="fselect" id="ext-conta" style="min-width:240px; font-weight:600;">
-              <option value="todas">🌐 Todas as Contas (Consolidado)</option>
-              <optgroup label="Contas Bancárias">
-                <option value="itau">🏦 Itaú conta corrente</option>
-                <option value="nubank_conta">🟣 Nubank conta</option>
-                <option value="btg">💼 BTG Banking</option>
-              </optgroup>
-              <optgroup label="Cartões de Crédito">
-                <option value="nubank_cartao">💳 Nubank (gold)</option>
-                <option value="mp_cartao">💳 Mercado Pago</option>
-                <option value="itau_cartao">💳 Itaú Visa Signature</option>
-              </optgroup>
+              <option value="todas">🌐 Todas as contas</option>
             </select>
             <button class="ghost" id="ext-btn-toggle-graficos" title="Ocultar ou exibir gráficos analíticos" style="padding:6px 12px; font-size:12.5px;">📊 Gráficos</button>
             <button class="ghost" id="ext-export" title="Exportar seleção atual para CSV" style="padding:6px 12px; font-size:12.5px;">⬇ CSV</button>
@@ -110,21 +74,6 @@
 
         <!-- KPI Strip: Saldos & Liquidez em tempo real -->
         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
-          <div class="ext-kpi-card">
-            <span class="lbl">DISPONÍVEL EM CONTA</span>
-            <span class="val mono" style="color:var(--green);" id="ext-global-disponivel">—</span>
-            <span class="sub muted">saldos bancários somados</span>
-          </div>
-          <div class="ext-kpi-card">
-            <span class="lbl">FATURAS ABERTAS (CARTÕES)</span>
-            <span class="val mono" style="color:var(--red);" id="ext-global-faturas">—</span>
-            <span class="sub muted">passivo curto prazo aberto</span>
-          </div>
-          <div class="ext-kpi-card">
-            <span class="lbl" id="ext-kpi-conta-label">SALDO CONSOLIDADO</span>
-            <span class="val mono" id="ext-conta-saldo">—</span>
-            <span class="sub muted" id="ext-conta-quando">via open banking</span>
-          </div>
           <div class="ext-kpi-card">
             <span class="lbl">FLUXO DO PERÍODO FILTRADO</span>
             <span class="val mono" id="ext-kpi-resultado">—</span>
@@ -505,57 +454,6 @@
       </dialog>
     </section>
 
-    <!-- ================= COMPRAS ================= -->
-    <section id="view-compras" hidden>
-      <div class="filters">
-        <input type="search" id="comp-busca" class="fselect" placeholder="buscar estabelecimento…" style="flex:1; min-width:200px;">
-        <select class="fselect" id="comp-status" style="width:auto;">
-          <option value="">Todas</option>
-          <option value="paralelas">Paralelas (revisar)</option>
-          <option value="canceladas">Canceladas</option>
-        </select>
-        <span class="muted" id="comp-resumo"></span>
-      </div>
-      <div class="panel">
-        <table id="tbl-compras">
-          <thead><tr><th>Estabelecimento</th><th>Valor/parcela</th><th>Parcelas</th><th>Início</th><th>Fonte</th><th>Progresso</th><th>Evidências</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <dialog id="dlg-compra">
-        <div style="min-width:520px;">
-          <h3 id="comp-dlg-titulo" style="margin-bottom:14px;"></h3>
-          <div id="comp-dlg-corpo"></div>
-          <menu style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px;">
-            <button type="button" class="ghost" onclick="this.closest('dialog').close()">Fechar</button>
-          </menu>
-        </div>
-      </dialog>
-    </section>
-
-    <!-- ================= IMPORTAR ================= -->
-    <section id="view-importar" hidden>
-      <div class="grid g23">
-        <div class="panel">
-          <h4>⬆ IMPORTAR FATURAS E EXTRATOS (PDF)</h4>
-          <p class="muted" style="margin-bottom:16px;">Arraste os PDFs das faturas (Nubank, Itaú, Mercado Pago) ou extratos (Itaú conta). O sistema detecta o formato, deduplica por transação, categoriza e atualiza tudo — depois gera sugestões de conciliação pra você aprovar.</p>
-          <label class="cta" style="display:inline-block; cursor:pointer;">
-            Selecionar PDFs
-            <input type="file" id="file-pdf" accept=".pdf" multiple hidden>
-          </label>
-          <div id="import-log" style="margin-top:16px; font-family:'IBM Plex Mono'; font-size:12px; color:var(--muted);"></div>
-        </div>
-        <div class="panel">
-          <h4>QUANDO USAR</h4>
-          <p class="muted">Opcional: o dia a dia vem da AUVP. Use o PDF só para trazer um período que a AUVP não tem. Transação que já existe não entra de novo.</p>
-        </div>
-      </div>
-      <div class="panel" style="margin-top:12px;">
-        <h4>HISTÓRICO DE IMPORTAÇÕES</h4>
-        <table><thead><tr><th>Data</th><th>Arquivo</th><th>Tipo</th><th>Linhas</th></tr></thead><tbody id="imp-hist"></tbody></table>
-      </div>
-    </section>
-
     <!-- ================= RECONCILIAR ================= -->
     <section id="view-reconciliar" hidden>
       <div class="panel" style="margin-bottom:14px; padding:16px 20px;">
@@ -629,28 +527,16 @@
           <div id="auvp-sync-result" style="margin-top:14px;"></div>
         </div>
         <div class="panel">
-          <h4>IA PARA IMPORTAÇÃO (Ollama Cloud)</h4>
-          <p class="muted" style="margin-bottom:16px;">Usada na camada de sugestão do import: transações sem regra são enviadas pra IA categorizar, e você revisa na prévia antes de inserir. Sem API key, o import funciona só com regras.</p>
-          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API Base URL
-            <input id="cfg-ia-url" class="fselect" style="width:100%; margin-top:5px;" placeholder="https://ollama.com">
+          <h4>IMPORTAR PDF (OPCIONAL)</h4>
+          <p class="muted" style="margin-bottom:16px;">O dia a dia vem da AUVP. Use PDF de fatura (Nubank, Itaú, Mercado Pago) ou extrato (Itaú) só para trazer um período que a AUVP não tem. O que a AUVP já trouxe não entra de novo.</p>
+          <label class="cta" style="display:inline-block; cursor:pointer;">
+            Selecionar PDFs
+            <input type="file" id="file-pdf" accept=".pdf" multiple hidden>
           </label>
-          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API Key
-            <input id="cfg-ia-key" type="password" class="fselect" style="width:100%; margin-top:5px;" placeholder="cole sua api key aqui">
-          </label>
-          <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">Modelo
-            <input id="cfg-ia-model" class="fselect" style="width:100%; margin-top:5px;" placeholder="ex: gpt-oss:120b">
-          </label>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <button class="cta" id="cfg-ia-salvar">Salvar</button>
-            <button class="ghost" id="cfg-ia-testar">🔌 Testar conexão</button>
-            <span id="cfg-ia-status" class="muted"></span>
+          <div id="import-log" style="margin-top:16px; font-family:'IBM Plex Mono'; font-size:12px; color:var(--muted);"></div>
+          <div class="tabela-rolavel" style="margin-top:12px;">
+            <table><thead><tr><th>Data</th><th>Arquivo</th><th>Tipo</th><th>Linhas</th></tr></thead><tbody id="imp-hist"></tbody></table>
           </div>
-        </div>
-        <div class="panel">
-          <h4>COMO A IA É USADA</h4>
-          <p class="muted" style="margin-bottom:10px;">A ordem de sugestão é sempre: <b>padrão confirmado → regra → IA → manual</b>. A IA nunca sobrescreve regra aprendida, e cada aprovação sua vira regra (a IA é chamada cada vez menos).</p>
-          <p class="muted" style="margin-bottom:10px;"><b>Privacidade:</b> só descrição, valor e data da transação vão na requisição. Nada de saldos, nome ou CPF.</p>
-          <p class="muted">Toggle "usar IA" no import: pode importar com IA desligada quando quiser.</p>
         </div>
       </div>
     </section>

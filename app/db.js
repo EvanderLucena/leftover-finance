@@ -297,6 +297,11 @@ CREATE TABLE IF NOT EXISTS fatura_itens (
   PRIMARY KEY (fatura_id, transacao_id)
 );
 
+CREATE TABLE IF NOT EXISTS auvp_categorias (
+  id INTEGER PRIMARY KEY,          -- category_id da AUVP
+  nome TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS conciliacoes_recusadas_par (
   lancamento_id INTEGER NOT NULL,
   transacao_id INTEGER NOT NULL,
@@ -312,6 +317,8 @@ try {
 } catch (e) { /* coluna já existe */ }
 // médias de gasto antigas (gasto_cartao_avista, gasto_pix_variavel…): a Projeção não usa previsão desde 15/10/2026
 db.exec("DELETE FROM config WHERE chave LIKE 'gasto\\_%' ESCAPE '\\'");
+// IA removida em 15/10/2026 (não mexia em nenhum número do núcleo): sai a configuração, inclusive a chave
+db.exec("DELETE FROM config WHERE chave IN ('api_ia_url', 'api_ia_key', 'api_ia_model', 'insights_ia_cache', 'insights_ia_gerado_em')");
 
 // rendas: como reconhecer o crédito real e em que mês ele conta (competência)
 try { db.exec('ALTER TABLE rendas ADD COLUMN padrao_regex TEXT'); } catch (e) { /* já existe */ }

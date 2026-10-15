@@ -53,4 +53,11 @@ function diaDoMes(ym, dia) {
   return `${ym}-${pad(Math.min(dia, ultimo))}`;
 }
 
-module.exports = { FERIADOS, hojeISO, dataBrasilia, addMes, mesesEntre, refParaYm, ymParaRef, proximoDiaUtil, diaDoMes };
+// último dia útil do mês ym (ex.: quando cai o pagamento do fim do mês)
+function ultimoDiaUtil(ym) {
+  const d = new Date(diaDoMes(ym, 31) + 'T12:00:00Z');
+  while ([0, 6].includes(d.getUTCDay()) || FERIADOS.has(d.toISOString().slice(0, 10))) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+module.exports = { FERIADOS, hojeISO, dataBrasilia, addMes, mesesEntre, refParaYm, ymParaRef, proximoDiaUtil, ultimoDiaUtil, diaDoMes };
