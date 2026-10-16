@@ -300,16 +300,11 @@ function chartOpts() {
 }
 
 // ---------- EXTRATOS & LIVRO-RAZÃO UNIFICADO ----------
-const NOME_FONTE = {
-  'itau-conta': 'Itaú conta',
-  'itau-fatura': 'Itaú Visa',
-  'nubank': 'Nubank fatura',
-  'nubank-conta': 'Nubank conta',
-  'mercadopago': 'Mercado Pago',
-  'auvp-mcp': 'AUVP cartão',
-  'auvp-bank': 'AUVP conta',
-  'btg': 'BTG Banking'
-};
+// nome de cada fonte: as da AUVP têm nome fixo; as importações antigas levam o nome da conta (Configurar)
+const NOME_FONTE = { 'auvp-mcp': 'Cartão (AUVP)', 'auvp-bank': 'Conta (AUVP)', manual: 'Lançado à mão' };
+api('/api/contas?todas=1').then(contas => {
+  for (const c of contas || []) for (const f of c.fontes || []) if (!NOME_FONTE[f]) NOME_FONTE[f] = c.nome;
+}).catch(() => {});
 const nomeFonte = f => NOME_FONTE[f] || f || '—';
 
 const NAT_ROTULO = {
@@ -1355,9 +1350,10 @@ async function loadProjecao() {
   // só o que já foi comprado (regra de 15/10/2026); "livre a partir de" = mês seguinte à última parcela
   const dividasLista = dividas.emAndamento || [];
   const linha = (dividas.linha_do_tempo || []).filter(l => l.total > 0);
-  const ORDEM_FONTES = ['Itaú', 'Nubank', 'Mercado Pago', 'BTG', 'Fora do cartão'];
-  const CORES_FONTES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181']; // validada no fundo #10161f
-  const idxFonte = f => { const i = ORDEM_FONTES.findIndex(n => String(f || '').startsWith(n)); return i < 0 ? ORDEM_FONTES.length : i; };
+  const CORES_FONTES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#8a63d2']; // validada no fundo #10161f
+  // ordem dos cartões pelo nome (estável entre meses), "Fora do cartão" por último
+  const ORDEM_FONTES = [...new Set((dividas.emAndamento || []).map(d => d.fonte).filter(f => f !== 'Fora do cartão'))].sort((x, y) => x.localeCompare(y, 'pt-BR')).concat('Fora do cartão');
+  const idxFonte = f => { const i = ORDEM_FONTES.indexOf(f); return i < 0 ? ORDEM_FONTES.length : i; };
   const corFonte = f => CORES_FONTES[idxFonte(f)] || '#64788f'; // a cor segue o cartão, nunca a posição
   const nomeFonte = f => String(f || '').replace(/\s*\(.*\)$/, '');
   const fontes = [...new Set(dividasLista.map(d => d.fonte))].sort((a, b) => idxFonte(a) - idxFonte(b));
@@ -1896,13 +1892,6 @@ document.getElementById('form-rec').onsubmit = async e => {
   toast('Recorrência salva com sucesso');
 };
 
-// ---------- IMPORTAR PDF (opcional, dentro de Configurar) ----------
-async function loadImportar() {
-  const hist = await api('/api/importacoes/historico').catch(() => []);
-  document.getElementById('imp-hist').innerHTML = hist.slice(0, 14).map(h =>
-    `<tr><td class="muted">${(h.data_importacao || '').slice(0, 16)}</td><td>${(h.arquivo || '').slice(0, 50)}</td><td>${h.tipo}</td><td>${h.linhas}</td></tr>`).join('');
-}
-
 // painel de conciliação
 async function carregarConciliacao() {
   const d = await api('/api/conciliar');
@@ -2099,24 +2088,6 @@ window.dialogAnexarPagamento = async function (lanc, aoConcluir, opts = {}) {
     aoConcluir && aoConcluir();
   };
   await carregar('');
-};
-
-document.getElementById('file-pdf').onchange = async e => {
-  const log = document.getElementById('import-log');
-  for (const f of [...e.target.files]) {
-    log.innerHTML += `<div>processando ${f.name}...</div>`;
-    const buf = await f.arrayBuffer();
-    try {
-      const r = await fetch('/api/extratos/importar-pdf', { method: 'POST', headers: { 'Content-Type': 'application/pdf', 'X-Arquivo': f.name }, body: buf });
-      const d = await r.json();
-      if (d.jaImportado) {
-        log.innerHTML += `<div style="color:var(--amber)">${ico('warn')} ${f.name}: este arquivo JÁ FOI importado em ${(d.importacao_anterior || '').slice(0, 10)} — ${d.inseridas} novas (as ${d.duplicadas} restantes já existiam, nada duplicado)</div>`;
-      } else {
-        log.innerHTML += `<div class="up">${ico('check')} ${f.name}: ${d.inseridas} novas, ${d.duplicadas} duplicadas</div>`;
-      }
-    } catch (err) { log.innerHTML += `<div style="color:var(--red)">${ico('x')} ${f.name}: ${err.message}</div>`; }
-  }
-  toast('Importação concluída — confira as sugestões em Reconciliar');
 };
 
 // ---------- CONFIGURAR ----------
@@ -2518,7 +2489,7 @@ function renderContasConfig(contas) {
 
     const vinculoAuvp = c.conta_auvp 
       ? `<span title="Conta conectada via Open Finance" style="font-size:11px; color:var(--muted);">🔗 Open Finance (${c.conta_auvp})</span>`
-      : `<span style="font-size:11px; color:var(--muted);">📁 Importação Local (PDF)</span>`;
+      : `<span style="font-size:11px; color:var(--muted);">Sem vínculo com a AUVP</span>`;
 
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
@@ -2646,7 +2617,6 @@ if (document.getElementById('modal-conta-salvar')) {
 }
 
 async function loadConfigurar() {
-  loadImportar(); // histórico de PDFs (painel opcional)
   // Contas e Cartões
   const todasContas = await api('/api/contas?todas=1').catch(() => []);
   renderContasConfig(todasContas);

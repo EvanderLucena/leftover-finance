@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('node:path');
 const db = require('./db');
+require('./scripts/regras-seed').seedRegras(); // banco novo: regras genéricas de partida
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -26,27 +27,11 @@ function getOrCreateMes(ref) {
   return m.id;
 }
 
-// fontes que representam FATURA DE CARTÃO (dinâmico via contas_bancarias)
-function getFontesCartao() {
-  try {
-    const contas = db.prepare("SELECT instituicao, fontes, auvp_fonte FROM contas_bancarias WHERE tipo='CREDIT'").all();
-    const set = new Set(['nubank', 'itau-fatura', 'mercadopago', 'auvp-mcp']);
-    for (const c of contas) {
-      if (c.instituicao) set.add(c.instituicao);
-      if (c.auvp_fonte) set.add(c.auvp_fonte);
-      try {
-        const fontes = JSON.parse(c.fontes || '[]');
-        fontes.forEach(f => set.add(f));
-      } catch (e) {}
-    }
-    return Array.from(set);
-  } catch (e) {
-    return ['nubank', 'itau-fatura', 'mercadopago', 'auvp-mcp'];
-  }
-}
-const sqlFontesCartao = (fontes) => `fonte IN (${(fontes || getFontesCartao()).map(() => '?').join(',')})`;
+// fontes que representam compra no cartão (core/fontes.js)
+const { fontesCartao } = require('./core/fontes');
+const sqlFontesCartao = fontes => `fonte IN (${fontes.map(() => '?').join(',')})`;
 
-const { mapaContasExtrato, listarContas, salvarConta, autoDescobrirContas } = require('./scripts/contas');
+const { mapaContasExtrato, listarContas, salvarConta } = require('./scripts/contas');
 const CONTAS_EXTRATO = new Proxy({}, {
   get(target, prop) {
     const mapa = mapaContasExtrato();
@@ -384,23 +369,7 @@ app.delete('/api/rendas/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// Status das rendas do mês (por fonte): estimada × realizada × pendente — alimenta o card da Visão
-app.get('/api/rendas/status', (req, res) => {
-  const { statusPorMes, totalRendaRealizada } = require('./scripts/renda-realizada');
-  const ref = req.query.mes || MES_ATUAL();
-  const [mm, aa] = ref.split('-').map(Number);
-  const mesIso = `${aa}-${String(mm).padStart(2, '0')}`;
-  const itens = statusPorMes(mesIso);
-  res.json({
-    mes: ref, mes_iso: mesIso,
-    itens,
-    estimada_total: Math.round(itens.reduce((s, i) => s + i.estimada, 0) * 100) / 100,
-    realizada_total: Math.round(totalRendaRealizada(mesIso) * 100) / 100,
-    pendente_total: Math.round(itens.reduce((s, i) => s + i.pendente, 0) * 100) / 100
-  });
-});
-
-// Lançar renda manual (ex: Cooper caiu, AUVP ainda não trouxe) — cria transação salario + rendas_realizadas
+// Lançar renda manual (o dinheiro caiu e a AUVP ainda não trouxe) — cria transação salario + rendas_realizadas
 app.post(['/api/rendas/lancar-manual', '/api/rendas/lançar-manual'], (req, res) => {
   const { renda_id, valor, data, observacao } = req.body || {};
   const r = db.prepare('SELECT * FROM rendas WHERE id=?').get(renda_id);
@@ -424,10 +393,8 @@ app.post(['/api/rendas/lancar-manual', '/api/rendas/lançar-manual'], (req, res)
     const rr = ins.run(dataIso, v, descricao, hash, `${r.nome} — lançado manualmente em ${new Date().toISOString().slice(0, 10)} (confirmado pelo usuário antes da AUVP)`);
     txId = Number(rr.lastInsertRowid);
     const { gravarRendaRealizada } = require('./scripts/renda-realizada');
-    // nome específico da fonte: 'Salário Coopersystem' → 'Coopersystem' (colide menos em UNIQUE(mes,descricao)
-    // com futuros registros da AUVP/PDF, que usam a regra detectada 'Cooper')
-    const nomeFonte = r.nome.replace(/^Salário\s+/i, '');
-    gravarRendaRealizada(mesIso, descricao, Math.abs(v), txId, nomeFonte);
+    // grava pelo nome da renda cadastrada: 'Salário Empresa X' → 'Empresa X' (UNIQUE(mes, descricao))
+    gravarRendaRealizada(mesIso, Math.abs(v), txId, r.nome.replace(/^Salário\s+/i, ''));
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
@@ -450,121 +417,6 @@ app.get('/api/dashboard', (req, res) => {
   const pago = lancamentos.filter(l => l.pago).reduce((s, l) => s + Math.abs(l.valor), 0);
   const proximos = lancamentos.filter(l => !l.pago).slice(0, 5).map(l => ({ descricao: l.descricao, vencimento: l.vencimento, valor: l.valor }));
   res.json({ ref, lancamentos, total, pago, proximos });
-});
-
-const insTx = db.prepare(`INSERT OR IGNORE INTO transacoes
-  (data, valor, descricao, fonte, natureza, categoria, tags, parcela, hash_unico, importacao_id, venc_fatura, observacao)
-  VALUES (@data, @valor, @descricao, @fonte, @natureza, @categoria, @tags, @parcela, @hash_unico, @importacao_id, @venc_fatura, @observacao)`);
-
-const { aplicarRegras } = require('./scripts/motor-regras');
-
-app.post('/api/importar-texto', (req, res) => {
-  try {
-    const tipo = req.body.tipo || 'extrato';
-    const texto = req.body.texto || '';
-    const { parseData, parseNumBR } = require('./scripts/parse-extrato');
-    const transacoes = texto.split(/\r?\n/).filter(l => l.trim()).map(l => {
-      const m = l.split(/[;\t,]/).map(s => s.trim());
-      const data = parseData(m[0]);
-      const descricao = m[1] || '';
-      const valor = parseNumBR(m[2]);
-      return { data, descricao, valor };
-    }).filter(t => t.data && t.descricao);
-    const r = db.prepare(`INSERT INTO importacoes (tipo, linhas, resumo) VALUES (?, ?, ?)`)
-      .run(tipo || 'fatura', transacoes.length, JSON.stringify(transacoes.slice(0, 50)));
-    res.json({ ok: true, importacao_id: Number(r.lastInsertRowid), transacoes });
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
-});
-
-function processarImportacaoBuffer(buffer, fonte, arquivo) {
-  const nomeArq = arquivo || fonte || '';
-  const anterior = db.prepare(`SELECT id, data_importacao FROM importacoes WHERE arquivo = ? ORDER BY id DESC LIMIT 1`).get(nomeArq);
-  const jaImportado = !!anterior;
-  const { superParsePDF } = require('./scripts/super-parser');
-
-  return superParsePDF(buffer, { nomeArq, fonte, anoFatura: new Date().getFullYear() }).then(parsed => {
-    const isFatura = parsed.isFatura;
-    const bancoFonte = parsed.bancoFonte;
-    const formato = parsed.formato;
-    let txs, resumoExtra = {};
-    if (isFatura) {
-      txs = (parsed.transacoes || []).filter(t => !t.futura);
-      resumoExtra = { venc: parsed.vencimento, total: parsed.total, parcelas_futuras: (parsed.proximas || []).length, metodo: parsed.metodo };
-      if (parsed.vencimento) {
-        const vencMes = parsed.vencimento.slice(0, 7);
-        for (const t of txs) {
-          if (t.parcela && !t.venc_fatura) t.venc_fatura = vencMes;
-          if (t.parcela && parsed.vencimento && t.data !== parsed.vencimento) {
-            t.observacao = t.observacao ? `${t.observacao} · Compra original: ${t.data}` : `Compra original: ${t.data}`;
-            t.data = parsed.vencimento;
-          }
-        }
-      }
-    } else {
-      txs = Array.isArray(parsed) ? parsed : (parsed.transacoes || []);
-      resumoExtra = { metodo: parsed.metodo || 'fastpath' };
-    }
-
-    const imp = db.prepare(`INSERT INTO importacoes (tipo, arquivo, linhas, resumo) VALUES (?, ?, ?, ?)`)
-      .run(isFatura ? 'fatura' : 'extrato', nomeArq, txs.length, JSON.stringify(resumoExtra));
-    const impId = Number(imp.lastInsertRowid);
-
-    // PDF é opcional (o dia a dia vem da AUVP): não entra o que a AUVP já trouxe da mesma origem
-    // (mesmo valor, até 3 dias de diferença, um para um) — o espelho da regra da sincronização
-    const { fontePdfDaConta } = require('./core/auvp-sync');
-    const daAUVP = db.prepare(`SELECT id, conta, fonte FROM transacoes WHERE hash_unico LIKE 'auvp%' AND ABS(valor - ?) < 0.01
-      AND data BETWEEN date(?, '-3 days') AND date(?, '+3 days')`);
-    const usadas = new Set();
-    const txsNovas = txs.filter(t => {
-      const par = daAUVP.all(t.valor, t.data, t.data).find(a => !usadas.has(a.id) && fontePdfDaConta(a.conta, a.fonte === 'auvp-mcp') === bancoFonte);
-      if (par) { usadas.add(par.id); return false; }
-      return true;
-    });
-    const jaNaAUVP = txs.length - txsNovas.length;
-
-    let inseridas = 0, duplicadas = 0;
-    for (const t of aplicarRegras(txsNovas)) {
-      const natureza = t.natureza || (t.valor < 0 ? 'gasto' : 'entrada');
-      const r = insTx.run({
-        data: t.data, valor: t.valor, descricao: t.descricao,
-        fonte: t.fonte || bancoFonte,
-        natureza, categoria: t.categoria || null, tags: t.tags || null, parcela: t.parcela || null,
-        hash_unico: t.hash_unico, importacao_id: impId, venc_fatura: t.venc_fatura || null,
-        observacao: t.observacao || null
-      });
-      if (r.changes > 0) inseridas++; else duplicadas++;
-    }
-    duplicadas += jaNaAUVP;
-
-    try {
-      const { autoConciliarMes } = require('./scripts/conciliacao');
-      autoConciliarMes(MES_ATUAL());
-    } catch (e) {}
-
-    return { formato, inseridas, duplicadas, jaImportado, importacao_anterior: anterior ? anterior.data_importacao : null, ...resumoExtra };
-  });
-}
-
-app.post('/api/extratos/importar-pdf', express.raw({ type: '*/*', limit: '20mb' }), (req, res) => {
-  try {
-    const fonte = req.query.fonte || req.headers['x-fonte'] || 'importado';
-    const arquivo = req.headers['x-arquivo'] || 'sem-nome.pdf';
-    processarImportacaoBuffer(req.body, fonte, arquivo)
-      .then(r => {
-        res.json({ ok: true, ...r });
-      })
-      .catch(e => res.status(500).json({ erro: e.message }));
-  } catch (e) {
-    res.status(500).json({ erro: e.message });
-  }
-});
-
-app.post('/api/extratos/importar', (req, res) => {
-  // CSV desativado (decisão 10/09/2026): fontes oficiais são PDF + AUVP.
-  // O código de parseCSV permanece para leitura de dados já importados.
-  res.status(400).json({ erro: 'Importação CSV desativada — use PDF (fatura/extrato) ou AUVP (open banking)' });
 });
 
 // ---------- API: transações ----------
@@ -830,13 +682,13 @@ app.get('/api/conciliar/padroes', (req, res) => {
 // ---------- API: evolução de cartão ----------
 app.get('/api/evolucao-cartao', (req, res) => {
   const fonte = req.query.fonte;
-  const fontesCartao = getFontesCartao();
+  const fontes = fontesCartao();
   let sql = `SELECT substr(data,1,7) mes, fonte,
     SUM(CASE WHEN parcela IS NULL THEN ABS(valor) ELSE 0 END) avista,
     SUM(CASE WHEN parcela IS NOT NULL THEN ABS(valor) ELSE 0 END) parc,
     SUM(ABS(valor)) total, COUNT(*) n
-    FROM transacoes WHERE natureza='gasto' AND ${sqlFontesCartao(fontesCartao)}`;
-  const params = [...fontesCartao];
+    FROM transacoes WHERE natureza='gasto' AND ${sqlFontesCartao(fontes)}`;
+  const params = [...fontes];
   if (fonte && fonte !== 'todos') { sql += ' AND fonte = ?'; params.push(fonte); }
   const per = clausulasPeriodo(req.query);
   sql += per.sql; params.push(...per.params);
@@ -938,11 +790,12 @@ app.get('/api/hoje', async (req, res) => {
 // ---------- API: Extrato por conta (estilo AUVP) ----------
 app.get('/api/extrato-conta', async (req, res) => {
   try {
-    const conta = req.query.conta || 'itau';
+    const conta = req.query.conta || 'todas';
     const hoje = new Date();
     const mesIso = (req.query.mes || hoje.toISOString().slice(0, 7)).slice(0, 7);
     const { saldosAUVP } = require('./scripts/saldos');
-    const saldos = await saldosAUVP();
+    let saldos = { saldos: [] };
+    try { saldos = await saldosAUVP(); } catch (e) { /* AUVP ainda não sincronizada: extrato sem saldo */ }
     const todas = saldos.saldos || [];
     const saldoDisponivel = todas.filter(s => s.tipo === 'BANK').reduce((s, c) => s + c.valor, 0);
     const faturasAbertas = todas.filter(s => s.tipo === 'CREDIT' && s.valor < 0).reduce((s, c) => s + Math.abs(c.valor), 0);
@@ -1030,13 +883,6 @@ app.post('/api/auvp/sync', async (req, res) => {
     if (auvpClient.limparCacheAUVP) auvpClient.limparCacheAUVP();
     const [contas, agendadas] = await Promise.all([auvpClient.pullContas(true), auvpClient.pullAgendadas()]);
     
-    // Auto-descoberta de novas contas/cartões pelo Open Finance
-    try {
-      if (Array.isArray(contas.contas)) {
-        autoDescobrirContas(contas.contas);
-      }
-    } catch (e) { console.error('Erro na auto-descoberta:', e.message); }
-
     // núcleo novo: transações por id + faturas oficiais e itens; depois atualiza os lançamentos de fatura
     let nucleo = null;
     try { nucleo = await require('./core/auvp-sync').sincronizarAUVP(); }
@@ -1073,7 +919,6 @@ app.get('/api/auvp/saldos', async (req, res) => {
 });
 
 // ---------- API: Reconciliar ----------
-const { detectarRenda } = require('./scripts/renda-realizada');
 
 app.get('/api/contas-mes-reconciliar', (req, res) => {
   // mesma regra das sugestões e da conciliação automática (scripts/conciliacao.js)
@@ -1133,13 +978,6 @@ app.post('/api/contas-mes-reconciliar/anexar', (req, res) => {
   res.json({ ok: true, valorAtualizado: Math.abs(Math.abs(t.valor) - Math.abs(l.valor)) > 0.01, troca: jaPaga });
 });
 
-// Prévia de reconciliação AUVP
-app.get('/api/importacoes/historico', (req, res) => {
-  res.json(db.prepare('SELECT * FROM importacoes ORDER BY id DESC LIMIT 30').all());
-});
-app.get('/api/importacoes/ultima', (req, res) => {
-  res.json(db.prepare('SELECT * FROM importacoes ORDER BY id DESC LIMIT 1').get());
-});
 app.get('/api/extratos/fontes', (req, res) => {
   res.json(db.prepare('SELECT fonte, COUNT(*) n FROM transacoes GROUP BY fonte ORDER BY n DESC').all());
 });

@@ -15,6 +15,11 @@ const { DatabaseSync } = require('node:sqlite');
 
 const APP = path.join(__dirname, '..');
 const FIX = path.join(__dirname, 'fixtures');
+// sem os dados (quem clonou o repositório): o teste não tem contra o que conferir
+if (!fs.existsSync(path.join(FIX, 'esperado.json'))) {
+  test('teste de ouro', { skip: 'sem test/fixtures/ — os dados reais ficam só na máquina de quem os gerou' }, () => {});
+  return;
+}
 const ESPERADO = JSON.parse(fs.readFileSync(path.join(FIX, 'esperado.json'), 'utf8'));
 const BANCO = path.join(FIX, 'financas-2026-10-15.db');
 const centavos = v => Math.round(Number(v) * 100);

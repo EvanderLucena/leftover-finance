@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/node.js-v20+-68a063?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/node.js-v22.5+-68a063?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/database-SQLite%20nativo-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" />
   <img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" />
   <img src="https://img.shields.io/badge/open--finance-AUVP%20API-4dabff?style=flat-square" alt="Open Finance" />
@@ -31,7 +31,6 @@ Liquidez Disponível = Saldo em Conta + Rendas Previstas
                      − Faturas de Cartão (correntes e compras parceladas)
                      − Despesas Fixas da Casa (aluguel, condomínio, luz, etc.)
                      − Parcelas Contratadas (empréstimos, financiamentos)
-                     − Média Móvel de Gastos Variáveis
 ────────────────────────────────────────────────────────────────────────────
 Sobra Real Livre     = O valor que você realmente tem disponível para poupar ou investir.
 ```
@@ -46,23 +45,20 @@ Sobra Real Livre     = O valor que você realmente tem disponível para poupar o
 - **Barra de Progresso Temporal do Mês:** Acompanhe o percentual do mês decorrido vs. ritmo de consumo da renda.
 
 ### 2. 💳 Inteligência de Faturas & Modelo de Parcelas
-- **Identidade Única de Compras:** Compras parceladas existem uma única vez no sistema; evidências vindas de múltiplos PDFs ou Open Finance são unificadas sem duplicar valores.
-- **Relógio de Faturas em Tempo Real:** Acompanhamento dinâmico de datas de corte (fechamento) e vencimento por emissor (Itaú, Nubank, Mercado Pago, etc.).
+- **Identidade Única de Compras:** Compras parceladas existem uma única vez no sistema; a mesma compra vista em várias faturas é unificada sem duplicar valores.
+- **Relógio de Faturas em Tempo Real:** Acompanhamento dinâmico de datas de corte (fechamento) e vencimento de cada cartão, aprendidos das faturas da AUVP (e ajustáveis em Configurar).
 - **Calendário de Descompressão de Dívidas:** Projeção visual de quando cada parcela contratada termina, permitindo prever a recuperação da renda nos próximos meses.
 
-### 3. 🏦 Conexão Open Finance (AUVP) & Super Parser PDF
-- **Sincronização Diária Open Finance:** Integração nativa com AUVP / MCP para pull automático de saldos bancários, faturas e transações agendadas.
-- **Super Parser de Extratos em PDF:** Leitura nativa de faturas detalhadas em PDF (Itaú, Nubank e Mercado Pago).
-- **Motor Heurístico de Regras:** Auto-categorização e detecção de natureza financeira (`gasto`, `transferencia`, `transferencia-propria`, `salario`, `rendimento`, `ignorado`).
-
-### 4. 🤖 Assistente de Diagnóstico Financeiro com IA
-- **Auditoria de Liquidez e Gastos:** Análise em tempo real do comprometimento orçamentário e recomendações práticas para corte de excessos.
-- **Suporte Flexível a Modelos:** Compatível com qualquer endpoint no formato OpenAI / Ollama (ex: DeepSeek-V3, Qwen, Ollama Cloud ou instâncias locais).
+### 3. 🏦 Open Finance pela AUVP (qualquer banco)
+- **Sincronização automática:** contas, cartões, saldos, faturas oficiais e transações vêm do MCP da AUVP. Funciona com qualquer banco conectado lá; nenhum banco fica fixo no código.
+- **Contas e cartões descobertos sozinhos:** cada conta ou cartão novo na AUVP aparece em Configurar, com fechamento e vencimento aprendidos das faturas.
+- **Rendas cadastradas por você:** salário fixo, por hora ou outra entrada, reconhecida pelo texto ou pelo valor do crédito.
+- **Motor de Regras:** categorização e natureza financeira (`gasto`, `transferencia`, `transferencia-propria`, `salario`, `rendimento`, `ignorado`), com a categoria da AUVP quando nenhuma regra casa.
 
 ### 5. 🔒 Privacidade Absoluta & Segurança de Chaves
 - **100% Local:** Todo o armazenamento reside em um banco SQLite (`financas.db`) gerenciado pelo módulo nativo `node:sqlite`.
 - **Zero Vazamento:** Extratos, senhas, planilhas e histórico financeiro são rigorosamente protegidos no `.gitignore`.
-- **Chaves de API Seguras:** Tokens de IA e Open Finance ficam armazenados apenas no banco de dados local da sua instância ou em variáveis de ambiente (`.env`), nunca sendo versionados ou expostos para terceiros.
+- **Chave da AUVP fora do banco:** fica num cofre local (no Windows, criptografada com DPAPI; no Linux/Docker, arquivo só do dono) ou em variável de ambiente, nunca no `financas.db` nem no git.
 
 ---
 
@@ -79,14 +75,12 @@ flowchart TD
     subgraph C2["Backend (Node.js & Express)"]
         API["Servidor REST API (/api)"]
         Rules["Motor de Heurísticas & Categorização"]
-        Parser["Super Parser de Faturas (PDF)"]
+        Motor["Motor de Comprometimento"]
         Sync["Sincronização Diária (Open Finance)"]
-        AI["Assistente de Diagnósticos com IA"]
 
         API --> Rules
-        API --> Parser
+        API --> Motor
         API --> Sync
-        API --> AI
     end
 
     subgraph C3["Persistência Local (100% Privado)"]
@@ -95,16 +89,14 @@ flowchart TD
 
     subgraph C4["Integrações Externas (Opcionais)"]
         AUVP["Open Finance (AUVP / MCP)"]
-        LLM["Provedores LLM (DeepSeek / Ollama)"]
     end
 
     UI -->|Requisições HTTP| API
     Rules --> DB
-    Parser --> DB
+    Motor --> DB
     Sync --> DB
 
     Sync --> AUVP
-    AI --> LLM
 ```
 
 ---
@@ -130,14 +122,18 @@ leftover-finance/
     │   ├── app.js           # Lógica do frontend
     │   ├── chart.umd.js     # Biblioteca gráfica Chart.js
     │   └── logo.svg         # Identidade visual
-    └── scripts/             # Módulos de lógica de negócios
-        ├── auvp-client.js   # Integração com API Open Finance
-        ├── faturas-abertas.js # Cálculo de faturas em aberto
-        ├── parcelas-futuras.js # Motor de projeção de dívidas
-        ├── super-parser.js  # Parser de faturas bancárias PDF
+    ├── core/                # Núcleo: sincronização AUVP, faturas, comprometimento, calendário
+    │   ├── auvp-sync.js     # Contas, cartões, faturas e transações da AUVP
+    │   ├── comprometido.js  # Motor único: faturas, contas, renda e sobra de cada mês
+    │   ├── fontes.js        # Origem de cada transação (cartão ou conta)
+    │   └── segredo.js       # Cofre local da chave da AUVP
+    └── scripts/             # Módulos de apoio
+        ├── auvp-client.js   # Cliente MCP da AUVP
+        ├── contas.js        # Contas e cartões (descobertos na AUVP)
+        ├── conciliacao.js   # Reconciliar: pagamento × conta do mês
         ├── motor-regras.js  # Categorização automática
-        ├── insights-ia.js   # Geração de análises com IA
-        └── sync-diario.js   # Agendador de sincronização em segundo plano
+        ├── regras-seed.js   # Regras iniciais genéricas
+        └── sync-diario.js   # Sincronização em segundo plano
 ```
 
 ---
@@ -147,7 +143,7 @@ leftover-finance/
 ### Opção 1: Executando Localmente (Node.js)
 
 #### Pré-requisitos
-- **Node.js 20+** instalado (requer suporte a `node:sqlite`).
+- **Node.js 22.5+** instalado (requer suporte a `node:sqlite`).
 - Gerenciador de pacotes **npm**.
 
 ```bash
@@ -165,7 +161,7 @@ cp .env.example .env
 npm start
 ```
 
-Acesse a interface no navegador: **`http://localhost:3000`**
+Acesse a interface no navegador: **`http://localhost:4321`** (ou a porta em `PORT`)
 
 ---
 
@@ -186,9 +182,6 @@ Edite o arquivo `.env`:
 DOMAIN=financas.seu-dominio.com
 AUTH_USER=admin
 AUTH_PASS_HASH=$2a$14$...   # Gerado via: docker run --rm caddy:2 caddy hash-password --plaintext 'sua-senha'
-IA_URL=https://api.deepseek.com
-IA_KEY=sua-chave-aqui
-IA_MODEL=deepseek-chat
 ```
 
 Inicie os serviços conteinerizados:
@@ -200,9 +193,7 @@ docker compose up -d
 
 ## 🔑 Segurança e Gestão de Chaves de API
 
-- **Nunca comite chaves de API:** As credenciais da AUVP (Open Finance) e provedores de IA (OpenAI / Ollama / DeepSeek) devem ser configuradas exclusivamente:
-  - Via arquivo `.env` (ignorado pelo Git); OU
-  - Diretamente na interface da aplicação em **Configurações** (armazenado de forma privada no seu arquivo local `financas.db`).
+- **Nunca comite chaves de API:** a chave da AUVP é informada em **Configurar** (vai para o cofre local, não para o banco) ou pela variável `AUVP_KEY` no `.env` (ignorado pelo Git).
 - O servidor nunca expõe chaves privadas nas rotas de status da API; apenas sinalizadores booleanos (`temKey: true/false`) são retornados à interface.
 
 ---

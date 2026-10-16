@@ -40,6 +40,7 @@ function criarConta(dados) {
     saldo_auvp: dados.saldo_auvp || null,
     fontes: JSON.stringify(dados.fontes || []),
     auvp_fonte: dados.auvp_fonte || (dados.tipo === 'CREDIT' ? 'auvp-mcp' : 'auvp-bank'),
+    auvp_conta_id: dados.auvp_conta_id ?? null,
     dia_fechamento: dados.dia_fechamento != null ? parseInt(dados.dia_fechamento) : null,
     dia_vencimento: dados.dia_vencimento != null ? parseInt(dados.dia_vencimento) : null,
     cor: dados.cor || (dados.tipo === 'CREDIT' ? '#b388ff' : '#00d68f'),
@@ -48,8 +49,8 @@ function criarConta(dados) {
   };
 
   db.prepare(`
-    INSERT INTO contas_bancarias (id, nome, instituicao, tipo, conta_auvp, saldo_auvp, fontes, auvp_fonte, dia_fechamento, dia_vencimento, cor, icone, ativo)
-    VALUES (@id, @nome, @instituicao, @tipo, @conta_auvp, @saldo_auvp, @fontes, @auvp_fonte, @dia_fechamento, @dia_vencimento, @cor, @icone, @ativo)
+    INSERT INTO contas_bancarias (id, nome, instituicao, tipo, conta_auvp, saldo_auvp, auvp_conta_id, fontes, auvp_fonte, dia_fechamento, dia_vencimento, cor, icone, ativo)
+    VALUES (@id, @nome, @instituicao, @tipo, @conta_auvp, @saldo_auvp, @auvp_conta_id, @fontes, @auvp_fonte, @dia_fechamento, @dia_vencimento, @cor, @icone, @ativo)
   `).run(nova);
 
   return obterContaPorId(id);
@@ -93,40 +94,36 @@ function autoDescobrirContas(contasAUVP) {
     const nome = c.nome || c.name || '';
     if (!nome) continue;
 
-    // Verificar se já existe por conta_auvp, saldo_auvp ou nome
-    const match = existentes.find(e => 
-      (e.conta_auvp && e.conta_auvp.toLowerCase() === nome.toLowerCase()) ||
-      (e.saldo_auvp && e.saldo_auvp.toLowerCase() === nome.toLowerCase()) ||
-      (e.nome && e.nome.toLowerCase() === nome.toLowerCase())
-    );
-
-    if (match) continue;
-
-    // É uma conta nova detectada pelo Open Finance!
-    const isCredit = c.tipo === 'CREDIT' || /credit|visa|master|black|gold|cartao|cartão|signature/i.test(nome) || Number(c.saldo) < 0;
+    // o tipo vem da AUVP (CREDIT = cartão)
+    const isCredit = c.tipo === 'CREDIT' || c.subtipo === 'CREDIT_CARD';
     const tipo = isCredit ? 'CREDIT' : 'BANK';
-    const slug = nome.toLowerCase()
+
+    // já existe: pelo id da AUVP; conta antiga sem id casa pelo nome e tipo e passa a guardar o id
+    const mesmoNome = n => n && n.toLowerCase() === nome.toLowerCase();
+    const match = (c.id != null && existentes.find(e => e.auvp_conta_id === c.id))
+      || existentes.find(e => e.tipo === tipo && e.auvp_conta_id == null && (mesmoNome(e.conta_auvp) || mesmoNome(e.saldo_auvp) || mesmoNome(e.nome)));
+    if (match) {
+      if (match.auvp_conta_id == null && c.id != null) {
+        db.prepare('UPDATE contas_bancarias SET auvp_conta_id = ? WHERE id = ?').run(c.id, match.id);
+        match.auvp_conta_id = c.id;
+      }
+      continue;
+    }
+
+    // conta nova na AUVP: o nome dá para trocar em Configurar
+    const slug = (isCredit ? 'cartao_' : 'conta_') + (nome.toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-    
-    // Detectar instituição básica
-    let instituicao = 'outro';
-    if (/itau/i.test(nome)) instituicao = 'itau';
-    else if (/nu|nubank/i.test(nome)) instituicao = 'nubank';
-    else if (/btg/i.test(nome)) instituicao = 'btg';
-    else if (/mercado/i.test(nome)) instituicao = 'mercadopago';
-    else if (/inter/i.test(nome)) instituicao = 'inter';
-    else if (/c6/i.test(nome)) instituicao = 'c6';
-    else if (/bradesco/i.test(nome)) instituicao = 'bradesco';
-    else if (/santander/i.test(nome)) instituicao = 'santander';
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || String(c.id));
+    const id = obterContaPorId(slug) ? slug + '_' + c.id : slug;
 
     const nova = criarConta({
-      id: slug,
+      id,
       nome: nome,
-      instituicao,
+      instituicao: c.marca || 'outro',
       tipo,
       conta_auvp: nome,
       saldo_auvp: nome,
+      auvp_conta_id: c.id ?? null,
       fontes: [],
       auvp_fonte: isCredit ? 'auvp-mcp' : 'auvp-bank',
       dia_fechamento: null,

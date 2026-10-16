@@ -58,15 +58,18 @@ async function baixarFaturas() {
 // ---------- cartões: descobertos na AUVP, perfil aprendido das faturas ----------
 // contas: [{ id, idExterno, nome }] dos cartões de crédito da AUVP
 function descobrirCartoes(contas) {
-  const local = db.prepare("SELECT id, nome FROM contas_bancarias WHERE tipo='CREDIT' AND LOWER(conta_auvp) = LOWER(?)");
+  const local = db.prepare(`SELECT id, nome FROM contas_bancarias WHERE tipo='CREDIT'
+    AND (auvp_conta_id = ? OR (auvp_conta_id IS NULL AND LOWER(conta_auvp) = LOWER(?))) ORDER BY auvp_conta_id IS NULL LIMIT 1`);
   const ins = db.prepare(`INSERT OR IGNORE INTO cartoes (conta_id, conta_externa, conta_local, nome, fecha_dia, vence_dia, incluir, perfil_conferido)
     VALUES (?, ?, ?, ?, 0, 0, 0, 0)`);
   const externa = db.prepare('UPDATE cartoes SET conta_externa = ? WHERE conta_id = ? AND conta_externa IS NULL');
+  const vincula = db.prepare('UPDATE cartoes SET conta_local = ?, nome = ? WHERE conta_id = ? AND conta_local IS NULL');
   for (const c of contas) {
     if (c.id == null || !c.idExterno) continue;
-    const l = local.get(c.nome || '');
+    const l = local.get(c.id, c.nome || '');
     ins.run(c.id, c.idExterno, l ? l.id : null, l ? l.nome : (c.nome || 'Cartão ' + c.id));
     externa.run(c.idExterno, c.id);
+    if (l) vincula.run(l.id, l.nome, c.id);
   }
 }
 
@@ -168,32 +171,30 @@ function categoriaAUVP(t) {
 // ---------- transações da AUVP -> tabela `transacoes` (Contas do mês e Reconciliar) ----------
 const parcelaDaDescricao = d => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\s*$/); return m && +m[1] >= 1 && +m[1] <= +m[2] ? `${+m[1]}/${+m[2]}` : null; };
 
-// Transações da AUVP que já estão no banco vindas dos PDFs (extratos e faturas importados antes da AUVP).
-// Casamento um para um: mesma origem (conta ou cartão), mesmo valor, até 3 dias de diferença,
-// e só dentro do período que o PDF daquela origem cobre.
-function fontePdfDaConta(nome, cartao) {
-  const n = String(nome || '').toLowerCase();
-  if (/ita[uú]/.test(n)) return cartao ? 'itau-fatura' : 'itau-conta';
-  if (/mercado ?pago/.test(n)) return 'mercadopago';
-  if (/^nu |nubank|^gold$/.test(n)) return 'nubank';
-  return null;
-}
-function transacoesJaImportadasDePdf(contas) {
+// Transações da AUVP que já estão no banco vindas de importações antigas (PDFs anteriores à AUVP).
+// As fontes antigas de cada conta ficam em contas_bancarias.fontes (core/fontes.js); banco novo não tem nenhuma.
+// Casamento um para um: mesma conta, mesmo valor, até 3 dias de diferença,
+// e só dentro do período que a importação antiga daquela fonte cobre.
+function transacoesJaImportadasAntes(contas) {
+  const { fontesAntigasDaConta } = require('./fontes');
   const cobertura = new Map(db.prepare(`SELECT fonte, MAX(data) ate FROM transacoes
-    WHERE fonte IN ('itau-conta', 'itau-fatura', 'mercadopago', 'nubank') GROUP BY fonte`).all().map(r => [r.fonte, r.ate]));
+    WHERE fonte NOT IN ('auvp-mcp', 'auvp-bank', 'manual') GROUP BY fonte`).all().map(r => [r.fonte, r.ate]));
+  const cobertas = new Set();
+  if (!cobertura.size) return cobertas;
   const candidatos = db.prepare(`SELECT id, data FROM transacoes WHERE fonte = ? AND ABS(valor - ?) < 0.01
     AND data BETWEEN date(?, '-3 days') AND date(?, '+3 days') ORDER BY ABS(julianday(data) - julianday(?)), id`);
   const usados = new Set();
-  const cobertas = new Set();
   const auvp = db.prepare('SELECT id, conta_id, data, valor FROM auvp_transacoes ORDER BY data, id').all();
+  const fontesDe = new Map();
   // 1ª passada: mesma data; 2ª: até 3 dias (assim um PIX do dia 19 não toma o par de uma transferência do dia 20)
   for (const folga of [0, 3]) for (const t of auvp) {
     if (cobertas.has(t.id)) continue;
-    const c = contas.get(t.conta_id) || {};
-    const fonte = fontePdfDaConta(c.nome, c.cartao);
-    if (!fonte || !cobertura.has(fonte) || t.data > cobertura.get(fonte)) continue;
-    const par = candidatos.all(fonte, t.valor, t.data, t.data, t.data).find(r => !usados.has(r.id) && Math.abs(Date.parse(r.data) - Date.parse(t.data)) <= folga * 864e5);
-    if (par) { usados.add(par.id); cobertas.add(t.id); }
+    if (!fontesDe.has(t.conta_id)) { const c = contas.get(t.conta_id) || {}; fontesDe.set(t.conta_id, fontesAntigasDaConta(t.conta_id, c.nome, c.cartao)); }
+    for (const fonte of fontesDe.get(t.conta_id)) {
+      if (!cobertura.has(fonte) || t.data > cobertura.get(fonte)) continue;
+      const par = candidatos.all(fonte, t.valor, t.data, t.data, t.data).find(r => !usados.has(r.id) && Math.abs(Date.parse(r.data) - Date.parse(t.data)) <= folga * 864e5);
+      if (par) { usados.add(par.id); cobertas.add(t.id); break; }
+    }
   }
   return cobertas;
 }
@@ -211,7 +212,7 @@ function importarParaTransacoes(hoje = hojeISO()) {
   const creditoManual = db.prepare(`SELECT 1 FROM transacoes WHERE fonte='manual' AND ABS(valor-?)<0.01 AND data BETWEEN date(?, '-3 days') AND date(?, '+3 days')`);
   const ins = db.prepare(`INSERT OR IGNORE INTO transacoes (data, valor, descricao, fonte, natureza, categoria, parcela, conta, hash_unico, observacao)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const jaNoPdf = transacoesJaImportadasDePdf(contas);
+  const jaImportadas = transacoesJaImportadasAntes(contas);
   // cópia importada antes desta regra existir: sai, desde que nada aponte para ela
   const removerCopia = db.prepare(`DELETE FROM transacoes WHERE hash_unico IN (?, ?)
     AND id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL)
@@ -222,7 +223,7 @@ function importarParaTransacoes(hoje = hojeISO()) {
   db.exec('BEGIN');
   try {
     for (const t of db.prepare('SELECT * FROM auvp_transacoes WHERE data <= ? ORDER BY data').all(hoje)) {
-      if (jaNoPdf.has(t.id)) { removerCopia.run('auvp-' + t.id, 'auvp-pos-' + t.id); continue; } // já veio de PDF, antes da AUVP
+      if (jaImportadas.has(t.id)) { removerCopia.run('auvp-' + t.id, 'auvp-pos-' + t.id); continue; } // já tinha vindo de importação antiga
       if (existe.get('auvp-' + t.id, 'auvp-pos-' + t.id, 'auvp-neg-' + t.id)) continue;
       if (t.valor > 0 && creditoManual.get(t.valor, t.data, t.data)) continue; // renda já lançada à mão
       const ehCartao = cartaoIds.has(t.conta_id) || (contas.get(t.conta_id) || {}).cartao;
@@ -266,9 +267,11 @@ async function sincronizarAUVP({ diasAtras = 60, hoje = hojeISO() } = {}) {
   const { contas, resumo } = await require('../scripts/auvp-client').pullContas(true);
   // saldos das contas: cache que a aba Hoje lê (scripts/saldos.js)
   db.prepare("INSERT INTO sincronizacoes_auvp (tipo, resultados) VALUES ('saldos', ?)").run(JSON.stringify({ contasLista: contas, contas: resumo }));
+  // conta ou cartão que apareceu na AUVP vira uma conta em Configurar (scripts/contas.js)
+  const contasNovas = require('../scripts/contas').autoDescobrirContas(contas || []);
   descobrirCartoes((contas || []).filter(c => c.subtipo === 'CREDIT_CARD' || c.tipo === 'CREDIT'));
   gravarFaturas(await baixarFaturas());
-  return { transacoes_auvp: txs.length, perfis_aprendidos: aprenderPerfis(hoje), ...posSincronizacao(hoje) };
+  return { transacoes_auvp: txs.length, contas_novas: contasNovas.map(c => c.nome), perfis_aprendidos: aprenderPerfis(hoje), ...posSincronizacao(hoje) };
 }
 
 // mesmo fluxo a partir de um retrato salvo em disco (testes): txall.json, faturas_*.json, fatura_<cartao>_<venc>.json
@@ -293,4 +296,4 @@ function importarRetrato(dir, hoje = hojeISO()) {
   return posSincronizacao(hoje);
 }
 
-module.exports = { sincronizarAUVP, chamarAUVP, descobrirCartoes, aprenderPerfis, fontePdfDaConta, importarRetrato, importarParaTransacoes, gravarTransacoes, gravarFaturas };
+module.exports = { sincronizarAUVP, chamarAUVP, descobrirCartoes, aprenderPerfis, importarRetrato, importarParaTransacoes, gravarTransacoes, gravarFaturas };

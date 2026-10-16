@@ -183,33 +183,17 @@ CREATE TABLE IF NOT EXISTS contas_bancarias (
 );
 `);
 
-// seed básico
+// banco novo: categorias de partida e o mês corrente; contas e cartões vêm da AUVP na primeira sincronização
 const cats = db.prepare('SELECT COUNT(*) AS n FROM categorias').get();
 if (cats.n === 0) {
   const ins = db.prepare('INSERT INTO categorias (nome) VALUES (?)');
-  ['Casa', 'Dívida', 'Mãe', 'Saúde', 'Cartões', 'Pets', 'Outros'].forEach(c => ins.run(c));
+  ['Casa', 'Mercado', 'Restaurantes', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Compras', 'Serviços', 'Dívida', 'Cartões', 'Outros'].forEach(c => ins.run(c));
 }
 const cfg = db.prepare("SELECT COUNT(*) AS n FROM config").get();
 if (cfg.n === 0) {
-  db.prepare("INSERT INTO config (chave, valor) VALUES ('mes_atual', '09-2026')").run();
-}
-
-// seed contas_bancarias
-const nContas = db.prepare('SELECT COUNT(*) AS n FROM contas_bancarias').get();
-if (nContas.n === 0) {
-  const insConta = db.prepare(`
-    INSERT INTO contas_bancarias (id, nome, instituicao, tipo, conta_auvp, saldo_auvp, fontes, auvp_fonte, dia_fechamento, dia_vencimento, cor, icone, ativo)
-    VALUES (@id, @nome, @instituicao, @tipo, @conta_auvp, @saldo_auvp, @fontes, @auvp_fonte, @dia_fechamento, @dia_vencimento, @cor, @icone, 1)
-  `);
-  const iniciais = [
-    { id: 'itau', nome: 'Itaú conta', instituicao: 'itau', tipo: 'BANK', conta_auvp: 'itau', saldo_auvp: 'itau', fontes: JSON.stringify(['itau-conta']), auvp_fonte: 'auvp-bank', dia_fechamento: null, dia_vencimento: null, cor: '#00d68f', icone: '🏦' },
-    { id: 'nubank_conta', nome: 'Nubank conta', instituicao: 'nubank', tipo: 'BANK', conta_auvp: 'Nu Pagamentos S.A. - Instituição de Pagamento', saldo_auvp: 'Nu Pagamentos S.A. - Instituição de Pagamento', fontes: JSON.stringify([]), auvp_fonte: 'auvp-bank', dia_fechamento: null, dia_vencimento: null, cor: '#820ad1', icone: '🟣' },
-    { id: 'btg', nome: 'BTG conta', instituicao: 'btg', tipo: 'BANK', conta_auvp: 'BTG Banking', saldo_auvp: 'BTG Banking', fontes: JSON.stringify([]), auvp_fonte: 'auvp-bank', dia_fechamento: null, dia_vencimento: null, cor: '#001e62', icone: '💼' },
-    { id: 'nubank_cartao', nome: 'Nubank (Gold)', instituicao: 'nubank', tipo: 'CREDIT', conta_auvp: 'gold', saldo_auvp: 'gold', fontes: JSON.stringify(['nubank', 'nubank-csv']), auvp_fonte: 'auvp-mcp', dia_fechamento: 24, dia_vencimento: 1, cor: '#820ad1', icone: '🟣' },
-    { id: 'itau_cartao', nome: 'Itaú (Uniclass Infinite)', instituicao: 'itau', tipo: 'CREDIT', conta_auvp: 'Itau Uniclass Visa Signature', saldo_auvp: 'Itau Uniclass Visa Signature', fontes: JSON.stringify(['itau-fatura']), auvp_fonte: 'auvp-mcp', dia_fechamento: 24, dia_vencimento: 1, cor: '#ff7a00', icone: '🟧' },
-    { id: 'mp_cartao', nome: 'Mercado Pago (Visa)', instituicao: 'mercadopago', tipo: 'CREDIT', conta_auvp: 'Mercado Pago', saldo_auvp: 'Mercado Pago', fontes: JSON.stringify(['mercadopago']), auvp_fonte: 'auvp-mcp', dia_fechamento: 29, dia_vencimento: 5, cor: '#009ee3', icone: '💙' }
-  ];
-  for (const c of iniciais) insConta.run(c);
+  const agora = new Date(Date.now() - 3 * 3600e3); // horário de Brasília
+  const ref = `${String(agora.getUTCMonth() + 1).padStart(2, '0')}-${agora.getUTCFullYear()}`;
+  db.prepare("INSERT INTO config (chave, valor) VALUES ('mes_atual', ?)").run(ref);
 }
 
 // migração aditiva: parcela_id em transacoes (bancos existentes)
@@ -319,6 +303,9 @@ try {
 db.exec("DELETE FROM config WHERE chave LIKE 'gasto\\_%' ESCAPE '\\'");
 // IA removida em 15/10/2026 (não mexia em nenhum número do núcleo): sai a configuração, inclusive a chave
 db.exec("DELETE FROM config WHERE chave IN ('api_ia_url', 'api_ia_key', 'api_ia_model', 'insights_ia_cache', 'insights_ia_gerado_em')");
+
+// conta na AUVP (user_account_id): o nome não basta, a mesma instituição pode ter conta e cartão com o mesmo nome
+try { db.exec('ALTER TABLE contas_bancarias ADD COLUMN auvp_conta_id INTEGER'); } catch (e) { /* já existe */ }
 
 // rendas: como reconhecer o crédito real e em que mês ele conta (competência)
 try { db.exec('ALTER TABLE rendas ADD COLUMN padrao_regex TEXT'); } catch (e) { /* já existe */ }
