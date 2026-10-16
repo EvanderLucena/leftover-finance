@@ -343,25 +343,52 @@ app.get('/api/categorias', (req, res) => {
 });
 
 // ---------- API: rendas ----------
+const R = require('./core/rendas');
+const TIPOS_RENDA = ['fixa', 'horas', 'variavel', 'eventual'];
+// campos de renda vindos da tela; undefined = não mexe
+function camposRenda(b) {
+  const num = v => (v === '' || v === null ? null : (v === undefined || !isFinite(+v) ? undefined : +v));
+  const c = {
+    nome: b.nome != null ? String(b.nome).trim() : undefined,
+    tipo: TIPOS_RENDA.includes(b.tipo) ? b.tipo : undefined,
+    valor_base: num(b.valor_base), valor_hora: num(b.valor_hora), horas_previstas: num(b.horas_previstas),
+    dia_pagamento: num(b.dia_pagamento), valor_exato: num(b.valor_exato), competencia_corte: num(b.competencia_corte),
+    padrao_regex: b.padrao_regex === undefined ? undefined : (String(b.padrao_regex || '').trim() || null),
+    observacao: b.observacao === undefined ? undefined : (b.observacao || null),
+    ativo: b.ativo == null ? undefined : (b.ativo ? 1 : 0)
+  };
+  if (c.padrao_regex) { try { new RegExp(c.padrao_regex, 'i'); } catch (e) { throw new Error('padrão inválido: ' + e.message); } }
+  return c;
+}
 app.get('/api/rendas', (req, res) => {
-  res.json(db.prepare('SELECT * FROM rendas WHERE ativo=1').all());
+  res.json(db.prepare('SELECT * FROM rendas WHERE ativo=1 ORDER BY id').all().map(r => ({ ...r, estimada: R.estimativa(r) })));
+});
+// entradas do histórico que parecem renda e ainda não estão cadastradas
+app.get('/api/rendas/sugestoes', (req, res) => {
+  res.json(R.sugestoes());
+});
+app.post('/api/rendas/sugestoes/dispensar', (req, res) => {
+  if (!req.body || !req.body.chave) return res.status(400).json({ erro: 'chave obrigatória' });
+  R.dispensarSugestao(req.body.chave);
+  res.json({ ok: true });
 });
 app.post('/api/rendas', (req, res) => {
-  const { nome, tipo, valor_base, padrao_texto, dia_pagamento, observacao, valor_hora } = req.body;
-  if (!nome) return res.status(400).json({ erro: 'nome obrigatório' });
-  const r = db.prepare(`INSERT INTO rendas (nome, tipo, valor_base, padrao_texto, dia_pagamento, observacao, valor_hora)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(nome, tipo || 'fixa', valor_base ?? null, padrao_texto || null, dia_pagamento ?? null, observacao || null, valor_hora ?? null);
+  let c;
+  try { c = camposRenda(req.body || {}); } catch (e) { return res.status(400).json({ erro: e.message }); }
+  if (!c.nome) return res.status(400).json({ erro: 'nome obrigatório' });
+  if (c.padrao_regex == null && c.valor_exato == null) return res.status(400).json({ erro: 'diga como reconhecer a renda: um texto do extrato ou o valor exato' });
+  const cols = Object.keys(c).filter(k => c[k] !== undefined);
+  const r = db.prepare(`INSERT INTO rendas (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...cols.map(k => c[k]));
   res.json({ ok: true, id: Number(r.lastInsertRowid) });
 });
 app.put('/api/rendas/:id', (req, res) => {
   const r = db.prepare('SELECT * FROM rendas WHERE id=?').get(req.params.id);
   if (!r) return res.status(404).json({ erro: 'não encontrada' });
-  const b = req.body;
-  db.prepare(`UPDATE rendas SET nome=?, tipo=?, valor_base=?, padrao_texto=?, dia_pagamento=?, observacao=?, ativo=?, valor_hora=? WHERE id=?`)
-    .run(b.nome ?? r.nome, b.tipo ?? r.tipo, b.valor_base ?? r.valor_base, b.padrao_texto ?? r.padrao_texto,
-      b.dia_pagamento ?? r.dia_pagamento, b.observacao ?? r.observacao,
-      b.ativo != null ? (b.ativo ? 1 : 0) : r.ativo, b.valor_hora ?? r.valor_hora, r.id);
+  let c;
+  try { c = camposRenda(req.body || {}); } catch (e) { return res.status(400).json({ erro: e.message }); }
+  if (!c.nome) delete c.nome;
+  const cols = Object.keys(c).filter(k => c[k] !== undefined);
+  if (cols.length) db.prepare(`UPDATE rendas SET ${cols.map(k => k + '=?').join(', ')} WHERE id=?`).run(...cols.map(k => c[k]), r.id);
   res.json({ ok: true });
 });
 app.delete('/api/rendas/:id', (req, res) => {

@@ -1273,9 +1273,6 @@ async function loadProjecao() {
   const _ticker = document.getElementById('proj-ticker');
   if (_ticker) _ticker.innerHTML = '';
 
-  // rendas agora moram na aba Configurar (renderizadas em loadConfigurar)
-  await renderRendasConfig(p.rendas || []);
-
   // legenda HTML — cores validadas no fundo #10161f; "Parcelados" usa a mesma cor de "Fora do cartão" no Alívio
   const COR_PROJ = { fixos: '#3987e5', faturas: '#c98500', parcelados: '#d55181', dia: '#9085e9', sobra: '#00d68f' };
   const temDiaADia = serieV2.some(s => s.dia_a_dia > 0);
@@ -2415,33 +2412,127 @@ function projTooltipHTML(context) {
   el.style.top = y + 'px';
 }
 
-// rendas (renderiza no painel de Configurar; usada por loadConfigurar e loadProjecao)
-async function renderRendasConfig(rendas) {
+// rendas (painel de Configurar; o assistente da primeira inicialização usa as mesmas funções)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const TIPO_RENDA = {
+  fixa: 'Fixa — o mesmo valor todo mês',
+  horas: 'Por hora — valor da hora × horas do mês',
+  variavel: 'Variável — média dos últimos 3 meses',
+  eventual: 'Eventual — só conta quando cair'
+};
+const jsonPost = (url, body, method = 'POST') => api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+async function renderRendasConfig() {
   const el = document.getElementById('p-rendas');
   if (!el) return;
-  el.innerHTML = rendas.map(r => `
-    <div class="renda-item"
- data-id="${r.id}" style="background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; font-size:15px;">
-        <b>${r.nome}</b><span class="muted">${r.tipo === 'horas' ? `${r.valor_hora}/h × ${r.horas_previstas || 168}h` : 'fixo'}</span>
+  const rendas = await api('/api/rendas').catch(() => []);
+  el.innerHTML = (rendas.length ? '' : '<p class="muted" style="font-size:13px;">Nenhuma renda cadastrada ainda. Veja abaixo as entradas que se repetem no seu histórico, ou cadastre uma.</p>')
+    + rendas.map(r => `
+    <div class="renda-item" data-id="${r.id}">
+      <div class="renda-topo">
+        <input class="renda-nome" data-field="nome" value="${esc(r.nome)}">
+        <button class="ghost renda-x" title="Remover renda">${ico('trash')}</button>
       </div>
-      <div style="display:flex; gap:14px; margin-top:10px;">
+      <div class="renda-campos">
+        <label>Tipo <select data-field="tipo">${Object.entries(TIPO_RENDA).map(([k, v]) => `<option value="${k}" ${r.tipo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         ${r.tipo === 'horas'
-      ? `<label class="muted" style="font-size:12.5px;">Hora R$ <input type="number" step="0.01" data-field="valor_hora" value="${r.valor_hora || ''}" style="width:100px; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 10px;"></label>
-           <label class="muted" style="font-size:12.5px;">Horas <input type="number" data-field="horas_previstas" value="${r.horas_previstas || 168}" style="width:80px; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 10px;"></label>`
-      : `<label class="muted" style="font-size:12.5px;">Valor R$ <input type="number" step="0.01" data-field="valor_base" value="${r.valor_base || ''}" style="width:120px; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 10px;"></label>`}
+      ? `<label>Hora R$ <input type="number" step="0.01" data-field="valor_hora" value="${r.valor_hora ?? ''}"></label>
+         <label>Horas no mês <input type="number" data-field="horas_previstas" value="${r.horas_previstas || 168}"></label>`
+      : r.tipo === 'eventual' ? ''
+        : `<label>${r.tipo === 'variavel' ? 'Valor se não houver histórico' : 'Valor'} R$ <input type="number" step="0.01" data-field="valor_base" value="${r.valor_base ?? ''}"></label>`}
+        <label>Cai por volta do dia <input type="number" min="1" max="31" data-field="dia_pagamento" value="${r.dia_pagamento ?? ''}"></label>
       </div>
-      ${r.observacao ? `<div class="muted" style="font-size:11.5px; margin-top:8px;">${r.observacao}</div>` : ''}
-    </div>`).join('');
-  el.querySelectorAll('input').forEach(inp => {
+      <div class="renda-campos">
+        ${r.valor_exato != null
+      ? `<label>Reconhecer pelo valor exato R$ <input type="number" step="0.01" data-field="valor_exato" value="${r.valor_exato}"></label>`
+      : `<label>Reconhecer pelo texto do extrato <input data-field="padrao_regex" value="${esc(r.padrao_regex || '')}" placeholder="ex.: NOME DA EMPRESA"></label>`}
+        <label class="chk"><input type="checkbox" data-field="corte" ${r.competencia_corte ? 'checked' : ''}> cai no fim do mês e paga o mês seguinte</label>
+      </div>
+      <div class="muted renda-rodape">${r.tipo === 'eventual' ? 'Não entra na previsão' : 'Previsão por mês: ' + fmt(r.estimada || 0)}${r.observacao ? ' · ' + esc(r.observacao) : ''}</div>
+    </div>`).join('')
+    + `<button class="ghost" id="btn-nova-renda" style="margin-top:4px;">${ico('plus')} Nova renda</button>
+       <div id="p-rendas-sug" style="margin-top:18px;"></div>`;
+
+  el.querySelectorAll('.renda-item [data-field]').forEach(inp => {
     inp.onchange = async e => {
-      const id = e.target.closest('.renda-item').dataset.id;
+      const item = e.target.closest('.renda-item');
+      const f = e.target.dataset.field;
       const body = {};
-      body[e.target.dataset.field] = e.target.value === '' ? null : parseFloat(e.target.value);
-      await api('/api/rendas/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      toast('Renda atualizada');
+      if (f === 'corte') body.competencia_corte = e.target.checked ? 20 : null;
+      else if (f === 'nome' || f === 'tipo' || f === 'padrao_regex') body[f] = e.target.value;
+      else body[f] = e.target.value === '' ? null : parseFloat(e.target.value);
+      try {
+        await jsonPost('/api/rendas/' + item.dataset.id, body, 'PUT');
+        toast('Renda atualizada');
+        if (f === 'tipo' || f === 'corte' || f === 'valor_base' || f === 'valor_hora' || f === 'horas_previstas' || f === 'padrao_regex' || f === 'valor_exato') renderRendasConfig();
+      } catch (err) { toast(err.message); }
     };
   });
+  el.querySelectorAll('.renda-x').forEach(b => {
+    b.onclick = async e => {
+      const item = e.target.closest('.renda-item');
+      if (!confirm('Remover esta renda? As transações continuam; ela só deixa de entrar nas contas do mês.')) return;
+      await api('/api/rendas/' + item.dataset.id, { method: 'DELETE' });
+      renderRendasConfig();
+    };
+  });
+  document.getElementById('btn-nova-renda').onclick = novaRenda;
+  renderSugestoesRenda(document.getElementById('p-rendas-sug'), renderRendasConfig);
+}
+
+async function novaRenda() {
+  const nome = prompt('Nome da renda (ex.: Salário, Aluguel recebido):');
+  if (!nome) return;
+  const texto = prompt('Como ela aparece no extrato? Digite um pedaço do texto (ex.: o nome da empresa).\nSe ela vem cada vez com um texto diferente mas sempre com o mesmo valor, deixe em branco.');
+  const body = { nome, tipo: 'fixa' };
+  if (texto && texto.trim()) body.padrao_regex = texto.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  else {
+    const v = parseFloat(String(prompt('Valor exato que cai (ex.: 850,00):') || '').replace(/\./g, '').replace(',', '.'));
+    if (!isFinite(v) || v <= 0) return toast('Sem texto nem valor não dá para reconhecer a renda');
+    body.valor_exato = v; body.valor_base = v;
+  }
+  try { await jsonPost('/api/rendas', body); toast('Renda cadastrada — ajuste o tipo e o valor'); renderRendasConfig(); }
+  catch (err) { toast(err.message); }
+}
+
+// entradas que se repetem no histórico: "é renda?" — aceitar cadastra com o que o histórico mostra
+async function renderSugestoesRenda(el, aoMudar) {
+  if (!el) return [];
+  const sug = await api('/api/rendas/sugestoes').catch(() => []);
+  if (!sug.length) { el.innerHTML = ''; return sug; }
+  el.innerHTML = `<h5 class="sug-titulo">Entradas que se repetem no seu histórico — são renda?</h5>`
+    + sug.map((s, i) => `
+    <div class="renda-sug" data-i="${i}">
+      <div>
+        <b>${esc(s.nome)}</b>
+        <div class="muted" style="font-size:12.5px;">caiu em ${s.meses} meses · ${s.valor_min === s.valor_max ? fmt(s.valor_mediano) : `de ${fmt(s.valor_min)} a ${fmt(s.valor_max)}`} · por volta do dia ${s.dia_tipico}</div>
+      </div>
+      <div class="renda-sug-acoes">
+        <select class="fselect sug-tipo">${Object.entries(TIPO_RENDA).map(([k, v]) => `<option value="${k}" ${s.tipo_sugerido === k ? 'selected' : ''}>${v.split(' —')[0]}</option>`).join('')}</select>
+        <button class="cta sug-sim">É renda</button>
+        <button class="ghost sug-nao">Não é</button>
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('.renda-sug').forEach(card => {
+    const s = sug[+card.dataset.i];
+    card.querySelector('.sug-sim').onclick = async () => {
+      const tipo = card.querySelector('.sug-tipo').value;
+      const body = {
+        nome: s.nome, tipo, padrao_regex: s.padrao_regex, valor_exato: s.valor_exato,
+        valor_base: tipo === 'variavel' ? s.media_mensal : s.valor_mediano,
+        dia_pagamento: s.dia_tipico, competencia_corte: s.competencia_corte
+      };
+      if (tipo === 'horas') { body.horas_previstas = 168; body.valor_hora = Math.round(s.valor_mediano / 168 * 100) / 100; }
+      try { await jsonPost('/api/rendas', body); toast('Renda cadastrada: ' + s.nome); aoMudar && aoMudar(); }
+      catch (err) { toast(err.message); }
+    };
+    card.querySelector('.sug-nao').onclick = async () => {
+      await jsonPost('/api/rendas/sugestoes/dispensar', { chave: s.chave });
+      card.remove();
+      if (!el.querySelector('.renda-sug')) el.innerHTML = '';
+    };
+  });
+  return sug;
 }
 
 // Gestão de Contas e Cartões (Configurar)
@@ -2621,9 +2712,7 @@ async function loadConfigurar() {
   const todasContas = await api('/api/contas?todas=1').catch(() => []);
   renderContasConfig(todasContas);
 
-  // rendas (movedas da Projeção)
-  const proj = await api('/api/projecao').catch(() => ({}));
-  await renderRendasConfig(proj.rendas || []);
+  await renderRendasConfig();
   // AUVP
   const auvp = await api('/api/config/auvp').catch(() => ({}));
   document.getElementById('cfg-auvp-url').value = auvp.url || 'https://financas-api.auvp.com.br/mcp';

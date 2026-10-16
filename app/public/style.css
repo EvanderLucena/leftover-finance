@@ -581,3 +581,22 @@ canvas { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale
   .cmes-conta { flex-direction: column; align-items: stretch; }
   input, select, textarea, button { font-size: 16px; } /* evita o zoom automático do iPhone ao focar */
 }
+
+/* rendas (Configurar e primeira inicialização) */
+.renda-item { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; }
+.renda-topo { display: flex; gap: 10px; align-items: center; }
+.renda-nome { flex: 1; min-width: 0; background: transparent; color: var(--txt); border: 1px solid transparent; border-radius: 7px; padding: 4px 6px; font-size: 15px; font-weight: 700; }
+.renda-nome:hover, .renda-nome:focus { border-color: var(--line); }
+.renda-x { padding: 6px 9px; }
+.renda-campos { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 10px; align-items: end; }
+.renda-campos label { color: var(--muted); font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
+.renda-campos label.chk { flex-direction: row; align-items: center; gap: 8px; }
+.renda-campos input:not([type=checkbox]), .renda-campos select { background: var(--bg); color: var(--txt); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; font-size: 13.5px; }
+.renda-campos input[type=number] { width: 120px; }
+.renda-campos input[data-field=padrao_regex] { width: 260px; max-width: 100%; }
+.renda-rodape { font-size: 12px; margin-top: 8px; }
+.sug-titulo { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.renda-sug { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px dashed var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
+.renda-sug-acoes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.renda-sug-acoes button { padding: 7px 14px; font-size: 13px; }
+.renda-sug-acoes .fselect { padding: 6px 10px; font-size: 13px; }

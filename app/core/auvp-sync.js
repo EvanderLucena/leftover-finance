@@ -206,7 +206,7 @@ function importarParaTransacoes(hoje = hojeISO()) {
       contas.set(r.id, { nome: r.nome, cartao: r.sub === 'CREDIT_CARD' });
   } catch (e) { /* sem json1 */ }
   const cartaoIds = new Set(db.prepare('SELECT conta_id FROM cartoes').all().map(r => r.conta_id));
-  const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1 AND padrao_regex IS NOT NULL').all();
+  const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1 AND padrao_regex IS NOT NULL').all().map(require('./rendas').casaRenda);
   const { aplicarRegras } = require('../scripts/motor-regras');
   const existe = db.prepare('SELECT 1 FROM transacoes WHERE hash_unico IN (?, ?, ?)');
   const creditoManual = db.prepare(`SELECT 1 FROM transacoes WHERE fonte='manual' AND ABS(valor-?)<0.01 AND data BETWEEN date(?, '-3 days') AND date(?, '+3 days')`);
@@ -230,7 +230,7 @@ function importarParaTransacoes(hoje = hojeISO()) {
       let natureza, categoria = null;
       if (t.interna) natureza = 'transferencia-propria';
       else if (t.ignorada) natureza = 'ignorado';
-      else if (t.valor > 0) natureza = rendas.some(r => new RegExp(r.padrao_regex, 'i').test(t.descricao)) ? 'salario' : 'entrada';
+      else if (t.valor > 0) natureza = rendas.some(casa => casa(t)) ? 'salario' : 'entrada';
       else {
         const [r] = aplicarRegras([{ descricao: t.descricao, valor: t.valor }]);
         natureza = r.natureza || 'gasto';

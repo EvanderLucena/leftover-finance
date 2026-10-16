@@ -491,20 +491,20 @@
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
             <div>
               <h4 style="margin:0;">MINHAS CONTAS E CARTÕES (OPEN FINANCE & BANCOS)</h4>
-              <p class="muted" style="margin:4px 0 0; font-size:13px;">Gerencie suas contas e cartões sincronizados via AUVP ou importados. Configure o dia de fechamento e vencimento de cada cartão para o cálculo preciso das faturas abertas.</p>
+              <p class="muted" style="margin:4px 0 0; font-size:13px;">Contas e cartões chegam sozinhos da AUVP. Configure o dia de fechamento e vencimento de cada cartão para o cálculo preciso das faturas abertas.</p>
             </div>
             <button class="cta" id="btn-nova-conta" style="padding:6px 14px; font-size:13px;">+ Nova Conta / Cartão</button>
           </div>
           <div id="p-contas-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:14px; margin-top:14px;"></div>
         </div>
         <div class="panel">
-          <h4>MINHAS RENDAS <span class="muted" style="font-size:12px; text-transform:none; letter-spacing:0">base da projeção — editável</span></h4>
+          <h4>MINHAS RENDAS <span class="muted" style="font-size:12px; text-transform:none; letter-spacing:0">base da projeção</span></h4>
           <div id="p-rendas"></div>
-          <p class="muted" style="font-size:11px; margin-top:10px;">Defina suas fontes de renda líquida para o cálculo automático das projeções mensais.</p>
+          <p class="muted" style="font-size:11px; margin-top:10px;">Cada renda é reconhecida no extrato pelo texto ou pelo valor exato. Fixa e por hora usam o valor que você informa; variável usa a média dos últimos 3 meses; eventual só conta quando cai.</p>
         </div>
         <div class="panel">
           <h4>AUVP FINANCEIRO (open banking)</h4>
-          <p class="muted" style="margin-bottom:16px;">Fonte de dados via open banking: sincroniza TODAS as suas contas conectadas (Itaú, Nubank, gold, BTG...), com saldos, transações e parcelas futuras agendadas.</p>
+          <p class="muted" style="margin-bottom:16px;">Fonte dos dados, via open finance: sincroniza todas as contas e cartões que você conectou na AUVP, com saldos, transações e parcelas futuras.</p>
           <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API URL
             <input id="cfg-auvp-url" class="fselect" style="width:100%; margin-top:5px;" placeholder="https://financas-api.auvp.com.br/mcp">
           </label>
@@ -538,7 +538,7 @@
     <input type="hidden" id="modal-conta-id">
     
     <label style="display:block; margin-bottom:12px; font-size:13px; color:var(--muted);">Nome da Conta ou Cartão
-      <input id="modal-conta-nome" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: Cartão BTG Black">
+      <input id="modal-conta-nome" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: Cartão do banco X">
     </label>
 
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:12px;">
