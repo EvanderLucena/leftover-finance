@@ -256,29 +256,49 @@ function dividas(hoje = cal.hojeISO()) {
       for (const i of f.itens.filter(x => x.parcela)) {
         const [k, n] = i.parcela.split('/').map(Number);
         const chave = `${c.conta_id}|${baseDescricao(i.descricao)}|${n}|${Math.round(Math.abs(i.valor))}`;
-        const p = planos.get(chave) || { descricao: String(i.descricao).replace(/\s*\d{1,2}\/\d{1,2}\s*$/, ''), valor: r2(Math.abs(i.valor)), total: n, restam: 0, ultimo: ym, menorK: k, tipo: 'cartao', fonte: c.nome };
-        p.restam++; if (ym > p.ultimo) p.ultimo = ym; if (k < p.menorK) p.menorK = k;
+        const p = planos.get(chave) || { descricao: String(i.descricao).replace(/\s*\d{1,2}\/\d{1,2}\s*$/, ''), valor: r2(Math.abs(i.valor)), total: n, restam: 0, primeiro: ym, ultimo: ym, menorK: k, tipo: 'cartao', fonte: c.nome };
+        p.restam++; if (ym > p.ultimo) p.ultimo = ym; if (ym < p.primeiro) p.primeiro = ym; if (k < p.menorK) p.menorK = k;
         planos.set(chave, p);
       }
     }
   }
   for (const r of db.prepare("SELECT * FROM recorrencias WHERE ativo=1 AND tipo='Parcelado' AND total_parcelas IS NOT NULL").all()) {
-    let restam = 0, ultimo = null, menorK = null;
-    for (let i = 1; i <= 60; i++) { const ym = cal.addMes(ym0, i); const k = parcelaNoMes(r, ym); if (k) { restam++; ultimo = ym; if (menorK == null) menorK = k; } }
-    if (restam) planos.set('rec|' + r.id, { descricao: r.descricao, valor: r2(Math.abs(r.valor)), total: r.total_parcelas, restam, ultimo, menorK, tipo: 'externo' });
+    let restam = 0, primeiro = null, ultimo = null, menorK = null;
+    for (let i = 1; i <= 60; i++) { const ym = cal.addMes(ym0, i); const k = parcelaNoMes(r, ym); if (k) { restam++; ultimo = ym; if (menorK == null) { menorK = k; primeiro = ym; } } }
+    if (restam) planos.set('rec|' + r.id, { descricao: r.descricao, valor: r2(Math.abs(r.valor)), total: r.total_parcelas, restam, primeiro, ultimo, menorK, tipo: 'externo', fonte: 'Fora do cartão' });
   }
   const emAndamento = [...planos.values()].map(p => ({
     descricao: p.descricao, valor: p.valor, restam: p.restam, total_restante: r2(p.valor * p.restam),
     progresso: `${p.menorK - 1}/${p.total}`, pct: Math.round((p.menorK - 1) / p.total * 100),
-    termina: `${p.ultimo.slice(5, 7)}/${p.ultimo.slice(0, 4)}`, tipo: p.tipo, fonte: p.fonte
-  })).sort((a, b) => a.termina.split('/').reverse().join('').localeCompare(b.termina.split('/').reverse().join('')));
-  const ym0n = cal.mesesEntre('2000-01', ym0);
-  const alivio = m => r2(emAndamento.filter(d => cal.mesesEntre('2000-01', `${d.termina.slice(3)}-${d.termina.slice(0, 2)}`) <= ym0n + m).reduce((s, d) => s + d.valor, 0));
+    termina: `${p.ultimo.slice(5, 7)}/${p.ultimo.slice(0, 4)}`, tipo: p.tipo, fonte: p.fonte,
+    primeiro_ym: p.primeiro, ultimo_ym: p.ultimo, livre_a_partir: cal.addMes(p.ultimo, 1)
+  })).sort((a, b) => a.ultimo_ym.localeCompare(b.ultimo_ym) || b.valor - a.valor);
+  // linha do tempo do alívio: quanto de parcela pesa em cada mês (por cartão / fora do cartão) e quanto
+  // deixa de pesar. Só o que já foi comprado — compra nova entra quando acontecer (regra de 15/10/2026).
+  const linha_do_tempo = [];
+  if (emAndamento.length) {
+    const fim = cal.addMes(emAndamento[emAndamento.length - 1].ultimo_ym, 1);
+    for (let ym = cal.addMes(ym0, 1); ym <= fim; ym = cal.addMes(ym, 1)) {
+      const ativas = emAndamento.filter(d => d.primeiro_ym <= ym && ym <= d.ultimo_ym);
+      const por_fonte = {};
+      for (const d of ativas) por_fonte[d.fonte] = r2((por_fonte[d.fonte] || 0) + d.valor);
+      const acabaram = emAndamento.filter(d => d.livre_a_partir === ym);
+      linha_do_tempo.push({ mes: ym, total: r2(ativas.reduce((s, d) => s + d.valor, 0)), por_fonte, contratos: ativas.length,
+        liberado: r2(acabaram.reduce((s, d) => s + d.valor, 0)), acabaram: acabaram.map(d => `${d.descricao} (${String(d.fonte).replace(/\s*\(.*\)$/, '')})`) });
+    }
+  }
+  // alívio em N meses = quanto a parcela do mês seguinte (o pico de hoje) cai até o mês ym0+N
+  const pesoEm = ym => (linha_do_tempo.find(l => l.mes === ym) || { total: 0 }).total;
+  const pesoAgora = linha_do_tempo.length ? linha_do_tempo[0].total : 0;
+  const alivio = n => r2(Math.max(0, pesoAgora - pesoEm(cal.addMes(ym0, n))));
   return {
     emAndamento, quitadasRecentes: [],
     total_passivo_restante: r2(emAndamento.reduce((s, d) => s + d.total_restante, 0)),
+    peso_mensal_agora: pesoAgora,
     alivio_3m: alivio(3), alivio_6m: alivio(6), alivio_12m: alivio(12),
     data_quitacao_total: emAndamento.length ? emAndamento[emAndamento.length - 1].termina : null,
+    livre_total_em: emAndamento.length ? emAndamento[emAndamento.length - 1].livre_a_partir : null,
+    linha_do_tempo,
     total_dividas_ativas: emAndamento.length
   };
 }

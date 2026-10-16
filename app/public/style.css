@@ -160,6 +160,11 @@ canvas.chart-lg { height: 400px !important; }
 canvas.chart-md { height: 280px !important; }
 canvas { max-width: 100%; height: 250px !important; }
 canvas.chart-proj { height: 340px !important; }
+.alivio-grafico { position: relative; height: 260px; }
+.alivio-leitura { font-size: 14px; line-height: 1.6; margin: 8px 0 10px; max-width: 980px; }
+.tbl-alivio tr.alivio-grupo td { background: var(--panel2); font-size: 13px; padding-top: 10px; padding-bottom: 10px; border-top: 1px solid var(--line); }
+.alivio-onde { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.alivio-onde i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 
 /* responsivo */
 @media (max-width: 1500px) { .g2 { grid-template-columns: 1fr; } }

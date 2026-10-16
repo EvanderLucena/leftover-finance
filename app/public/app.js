@@ -1100,6 +1100,7 @@ async function loadAnalise() {
 
 // ---------- PROJEÇÃO ----------
 let chartProj = null;
+let chartAlivio = null;
 async function loadProjecao() {
   const [p, dividas] = await Promise.all([api('/api/projecao'), api('/api/dividas')]);
 
@@ -1112,19 +1113,24 @@ async function loadProjecao() {
   const pctComprometidoM12 = m12.pct_comprometido || Math.round(m12.comprometido / p.renda_projetada * 100);
 
   const totalPassivo = dividas.total_passivo_restante || p.dividas_meta?.total_passivo_restante || 0;
-  const alivio3m = dividas.alivio_3m || p.dividas_meta?.alivio_3m || 0;
-  const alivio6m = dividas.alivio_6m || p.dividas_meta?.alivio_6m || 0;
-  const alivio12m = dividas.alivio_12m || p.dividas_meta?.alivio_12m || 0;
-  const quitacaoTotal = dividas.data_quitacao_total || p.dividas_meta?.data_quitacao_total || '03/2028';
+  const quitacaoTotal = dividas.data_quitacao_total || p.dividas_meta?.data_quitacao_total || '—';
   const totalAtivas = dividas.total_dividas_ativas || (dividas.emAndamento || []).length;
 
   // Renderiza Hero com inteligência de alívio bola de neve
   const heroEl = document.getElementById('proj-hero');
   if (heroEl) {
-    const rotuloCartaoM1 = (m1.mes === p.faturas_abertas?.mes_referencia)
-      ? `Faturas Abertas: <b class="down">${fmt(m1.parcelas_cartao || 0)}</b> (3 cartões)`
-      : `Cartões: ${fmt(m1.parcelas_cartao || 0)}`;
-
+    // alívio em 3/6/12 meses: quanto as parcelas do mês que vem (o pico de hoje) caem até aquele mês
+    const tl = dividas.linha_do_tempo || [];
+    const caixasAlivio = tl.length ? [3, 6, 12].map(n => {
+      const l = tl[n - 1] || { mes: tl[tl.length - 1].mes, total: 0 };
+      const s2 = serieV2.find(x => x.mes === `${l.mes.slice(5)}-${l.mes.slice(0, 4)}`);
+      return `
+        <div class="ph-box">
+          <span class="lbl">PARCELAS EM ${mesCurto(l.mes).toUpperCase()}</span>
+          <span class="val mono up">−${fmt(Math.max(0, tl[0].total - l.total))}/mês</span>
+          <span class="sub muted">pesam ${fmt(l.total)} (eram ${fmt(tl[0].total)} em ${mesCurto(tl[0].mes)})${s2 ? ` · sobra livre ${fmt(s2.sobra_livre)}` : ''}</span>
+        </div>`;
+    }).join('') : '';
     heroEl.innerHTML = `
       <div class="ph-main">
         <span class="lbl">COMPROMETIDO ATÉ HOJE · ${mesCurto(m1.mes).toUpperCase()}</span>
@@ -1142,23 +1148,9 @@ async function loadProjecao() {
         <div class="ph-box">
           <span class="lbl">PASSIVO TOTAL A QUITAR</span>
           <span class="val mono down">${fmt(totalPassivo)}</span>
-          <span class="sub muted">${totalAtivas} dívidas ativas · quitação total em ${quitacaoTotal}</span>
+          <span class="sub muted">${totalAtivas} contratos parcelados · última parcela em ${quitacaoTotal}</span>
         </div>
-        <div class="ph-box">
-          <span class="lbl">ALÍVIO EM 3 MESES (1º TRI)</span>
-          <span class="val mono up">+${fmt(alivio3m)}/mês</span>
-          <span class="sub muted">liberado já no 1º trimestre (${mesCurto(serieV2[2]?.mes || '')})</span>
-        </div>
-        <div class="ph-box">
-          <span class="lbl">ALÍVIO EM 6 MESES</span>
-          <span class="val mono up">+${fmt(alivio6m)}/mês</span>
-          <span class="sub muted">mais da metade quitada até ${mesCurto(serieV2[5]?.mes || '')}</span>
-        </div>
-        <div class="ph-box">
-          <span class="lbl">ALÍVIO EM 12 MESES</span>
-          <span class="val mono up">+${fmt(alivio12m)}/mês</span>
-          <span class="sub muted">sobra livre salta para ${fmt(m12.sobra_livre)}/mês</span>
-        </div>
+        ${caixasAlivio}
       </div>`;
   }
 
@@ -1349,63 +1341,94 @@ async function loadProjecao() {
     }
   });
 
-  // ===== CALENDÁRIO DE LIBERAÇÃO DE DÍVIDAS =====
+  // ===== ALÍVIO DAS PARCELAS (motor.dividas → linha_do_tempo) =====
+  // só o que já foi comprado (regra de 15/10/2026); "livre a partir de" = mês seguinte à última parcela
   const dividasLista = dividas.emAndamento || [];
-  let filtroAtual = 'todas';
+  const linha = (dividas.linha_do_tempo || []).filter(l => l.total > 0);
+  const ORDEM_FONTES = ['Itaú', 'Nubank', 'Mercado Pago', 'BTG', 'Fora do cartão'];
+  const CORES_FONTES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181']; // validada no fundo #10161f
+  const idxFonte = f => { const i = ORDEM_FONTES.findIndex(n => String(f || '').startsWith(n)); return i < 0 ? ORDEM_FONTES.length : i; };
+  const corFonte = f => CORES_FONTES[idxFonte(f)] || '#64788f'; // a cor segue o cartão, nunca a posição
+  const nomeFonte = f => String(f || '').replace(/\s*\(.*\)$/, '');
+  const fontes = [...new Set(dividasLista.map(d => d.fonte))].sort((a, b) => idxFonte(a) - idxFonte(b));
+  const linhaDe = ym => (dividas.linha_do_tempo || []).find(l => l.mes === ym);
 
-  function renderTabelaDividas() {
-    const busca = (document.getElementById('proj-dividas-busca')?.value || '').trim().toLowerCase();
-
-    const filtradas = dividasLista.filter(d => {
-      if (busca && !d.descricao.toLowerCase().includes(busca)) return false;
-      if (filtroAtual === 'cartao' && d.tipo !== 'cartao') return false;
-      if (filtroAtual === 'externo' && d.tipo !== 'externo') return false;
-      if (filtroAtual === '3m' && d.restam > 3) return false;
-      return true;
-    });
-
-    const totRestanteFiltrado = filtradas.reduce((s, d) => s + (d.total_restante || (d.valor * d.restam)), 0);
-    const resumoEl = document.getElementById('proj-dividas-resumo');
-    if (resumoEl) {
-      resumoEl.textContent = `${filtradas.length} de ${dividasLista.length} dívidas · ${fmt(totRestanteFiltrado)} restantes no total`;
+  // leitura em texto: o que muda e quando
+  const leituraEl = document.getElementById('alivio-leitura');
+  if (leituraEl) {
+    if (!linha.length) {
+      leituraEl.innerHTML = 'Nenhuma parcela em andamento: tirando as contas fixas, o que entra fica livre.';
+    } else {
+      const agora = linha[0];
+      const rendaAgora = (serieV2.find(s => s.mes === `${agora.mes.slice(5)}-${agora.mes.slice(0, 4)}`) || {}).renda;
+      const metade = linha.find(l => l.total <= agora.total / 2);
+      const grandes = [...dividasLista].sort((a, b) => b.total_restante - a.total_restante);
+      let acum = 0; const pesados = [];
+      for (const d of grandes) { if (acum >= totalPassivo / 2) break; pesados.push(d); acum += d.total_restante; }
+      const frases = [
+        `Em <b>${mesCurto(agora.mes)}</b> as parcelas pesam <b>${fmt(agora.total)}</b>${rendaAgora ? ` (${Math.round(agora.total / rendaAgora * 100)}% da renda)` : ''}, em ${agora.contratos} contratos.`
+      ];
+      if (metade) frases.push(`Em <b>${mesCurto(metade.mes)}</b> já caem para <b>${fmt(metade.total)}</b>: são <b class="up">${fmt(agora.total - metade.total)}/mês</b> a mais livres.`);
+      if (pesados.length && pesados.length <= 3) frases.push(`${pesados.length === 1 ? 'Um contrato concentra' : `${pesados.length} contratos concentram`} <b>${Math.round(acum / totalPassivo * 100)}%</b> dos ${fmt(totalPassivo)} que faltam: ${pesados.map(d => `${d.descricao} (${fmt(d.valor)}/mês até ${mesCurto(d.ultimo_ym)})`).join(' e ')}.`);
+      if (dividas.livre_total_em) frases.push(`Sem compra parcelada nova, a partir de <b>${mesCurto(dividas.livre_total_em)}</b> nenhuma parcela pesa.`);
+      leituraEl.innerHTML = frases.join(' ');
     }
-
-    const tbody = document.getElementById('proj-dividas');
-    if (!tbody) return;
-
-    if (!filtradas.length) {
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:24px; color:var(--muted);">Nenhuma dívida encontrada com os filtros selecionados.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = filtradas.map(d => `
-      <tr>
-        <td>
-          <b>${d.descricao.slice(0, 32)}</b>
-          ${d.fonte && d.fonte.includes('auvp') ? ' <span class="fbadge f-cred" style="font-size:9px;">auvp</span>' : ''}
-        </td>
-        <td>
-          <span class="tipo-badge ${d.tipo === 'cartao' ? 'tp-fixo' : 'tp-parcela'}">
-            ${d.tipo === 'cartao' ? 'Cartão' : 'Externo'}
-          </span>
-        </td>
-        <td class="mono">${d.restam}x</td>
-        <td class="mono">${fmt(d.valor)}</td>
-        <td class="mono" style="font-weight:700;">${fmt(d.total_restante || (d.valor * d.restam))}</td>
-        <td>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <div class="progress" style="flex:1; min-width:60px;"><i style="width:${d.pct}%"></i></div>
-            <span class="muted mono" style="font-size:11px;">${d.progresso}</span>
-          </div>
-        </td>
-        <td class="${d.restam <= 2 ? 'up' : ''}" style="font-weight:600;">${d.termina}</td>
-        <td class="up mono" style="font-weight:700;">+${fmt(d.valor)}/mês</td>
-      </tr>
-    `).join('');
   }
 
+  // gráfico: barras empilhadas por cartão, um mês por barra
+  const legEl = document.getElementById('alivio-legenda');
+  if (legEl) legEl.innerHTML = fontes.map(f => `<span class="leg-item"><i style="background:${corFonte(f)}"></i>${nomeFonte(f)}</span>`).join('');
+  if (chartAlivio) chartAlivio.destroy();
+  chartAlivio = null;
+  const cvAlivio = document.getElementById('ch-alivio');
+  if (cvAlivio && linha.length) {
+    chartAlivio = new Chart(cvAlivio, {
+      type: 'bar',
+      data: {
+        labels: linha.map(l => mesCurto(l.mes)),
+        datasets: fontes.map(f => ({
+          label: nomeFonte(f), data: linha.map(l => l.por_fonte[f] || 0), backgroundColor: corFonte(f),
+          borderColor: '#10161f', borderWidth: { top: 2 }, borderSkipped: 'bottom', maxBarThickness: 34, stack: 'p'
+        }))
+      },
+      options: {
+        maintainAspectRatio: false, responsive: true, animation: false, devicePixelRatio: 2,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            titleFont: { size: 13, weight: '700' }, bodyFont: { size: 12.5, weight: '500' }, footerFont: { size: 12, weight: '500' },
+            backgroundColor: '#141c27', borderColor: '#223042', borderWidth: 1, titleColor: '#dbe4ee', bodyColor: '#dbe4ee', footerColor: '#a8bcd2',
+            padding: 10, filter: i => i.parsed.y > 0,
+            callbacks: {
+              label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}`,
+              footer: items => {
+                const l = linha[items[0]?.dataIndex];
+                if (!l) return '';
+                const out = [`Total: ${fmt(l.total)} · ${l.contratos} contratos`];
+                if (l.liberado > 0) {
+                  out.push(`Saíram neste mês: −${fmt(l.liberado)}/mês`, ...l.acabaram.slice(0, 6).map(a => '  · ' + a));
+                  if (l.acabaram.length > 6) out.push(`  · e mais ${l.acabaram.length - 6}`);
+                }
+                return out;
+              }
+            }
+          }
+        },
+        scales: {
+          y: { stacked: true, grid: { color: 'rgba(255,255,255,.05)' }, ticks: { color: '#a8bcd2', font: { size: 13, weight: '600' }, callback: v => (v >= 1000 ? (v / 1000).toLocaleString('pt-BR') + ' mil' : v) } },
+          x: { stacked: true, grid: { display: false }, ticks: { color: '#a8bcd2', font: { size: 13, weight: '600' }, autoSkip: true, maxRotation: 0 } }
+        }
+      }
+    });
+  }
+
+  // tabela agrupada pelo mês em que o dinheiro fica livre
+  let filtroAtual = 'todas';
   const chipsContainer = document.getElementById('proj-filtros-chips');
   if (chipsContainer) {
+    chipsContainer.innerHTML = [['todas', 'Todas'], ...fontes.map(f => [f, nomeFonte(f)]), ['3m', 'Saem em até 3 meses']]
+      .map(([v, t], i) => `<span class="fchip${i === 0 ? ' on' : ''}" data-filtro="${v}">${t}</span>`).join('');
     chipsContainer.querySelectorAll('.fchip').forEach(chip => {
       chip.onclick = () => {
         chipsContainer.querySelectorAll('.fchip').forEach(c => c.classList.remove('on'));
@@ -1416,11 +1439,53 @@ async function loadProjecao() {
     });
   }
 
-  const buscaInp = document.getElementById('proj-dividas-busca');
-  if (buscaInp) {
-    buscaInp.oninput = () => renderTabelaDividas();
+  function renderTabelaDividas() {
+    const busca = (document.getElementById('proj-dividas-busca')?.value || '').trim().toLowerCase();
+    const semFiltro = filtroAtual === 'todas' && !busca;
+    const filtradas = dividasLista.filter(d => {
+      if (busca && !d.descricao.toLowerCase().includes(busca)) return false;
+      if (filtroAtual === '3m') return d.restam <= 3;
+      if (filtroAtual !== 'todas' && d.fonte !== filtroAtual) return false;
+      return true;
+    });
+    const totFiltrado = filtradas.reduce((s, d) => s + d.total_restante, 0);
+    const resumoEl = document.getElementById('proj-dividas-resumo');
+    if (resumoEl) resumoEl.textContent = `${filtradas.length} de ${dividasLista.length} contratos · ${fmt(totFiltrado)} a pagar`;
+
+    const tbody = document.getElementById('proj-dividas');
+    if (!tbody) return;
+    if (!filtradas.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--muted);">Nenhum contrato com esses filtros.</td></tr>';
+      return;
+    }
+    const grupos = new Map();
+    for (const d of filtradas) { if (!grupos.has(d.livre_a_partir)) grupos.set(d.livre_a_partir, []); grupos.get(d.livre_a_partir).push(d); }
+    tbody.innerHTML = [...grupos.entries()].map(([ym, ds]) => {
+      const livre = ds.reduce((s, d) => s + d.valor, 0);
+      const l = linhaDe(ym);
+      const depois = semFiltro && l ? ` · as parcelas caem para <b class="mono">${fmt(l.total)}</b>` : '';
+      return `
+      <tr class="alivio-grupo"><td colspan="7">A partir de <b>${mesCurto(ym)}</b> · <b class="up mono">+${fmt(livre)}/mês</b> livres · ${ds.length} ${ds.length === 1 ? 'contrato sai' : 'contratos saem'}${depois}</td></tr>
+      ${ds.map(d => `
+      <tr>
+        <td><b>${d.descricao.slice(0, 32)}</b></td>
+        <td><span class="alivio-onde"><i style="background:${corFonte(d.fonte)}"></i>${nomeFonte(d.fonte)}</span></td>
+        <td class="mono">${d.restam}x</td>
+        <td class="mono">${fmt(d.valor)}</td>
+        <td class="mono" style="font-weight:700;">${fmt(d.total_restante)}</td>
+        <td>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div class="progress" style="flex:1; min-width:60px;"><i style="width:${d.pct}%"></i></div>
+            <span class="muted mono" style="font-size:11px;">${d.progresso} pagas</span>
+          </div>
+        </td>
+        <td>${mesCurto(d.ultimo_ym)}</td>
+      </tr>`).join('')}`;
+    }).join('');
   }
 
+  const buscaInp = document.getElementById('proj-dividas-busca');
+  if (buscaInp) buscaInp.oninput = () => renderTabelaDividas();
   renderTabelaDividas();
 }
 
