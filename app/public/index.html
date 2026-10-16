@@ -290,16 +290,16 @@
       <!-- gráfico full-width + camadas explicadas -->
       <div class="panel" style="margin-bottom:12px;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-          <h4 style="margin:0;">COMPROMETIMENTO FUTURO <span class="muted" style="font-size:11px; text-transform:none">12 meses · barras = comprometido até hoje (gasto ou agendado) · linha = renda por competência · <b style="color:var(--green)">clique em qualquer barra para abrir o Raio-X 360° do mês</b></span></h4>
+          <h4 style="margin:0;">COMPROMETIMENTO FUTURO <span class="muted" style="font-size:11px; text-transform:none; margin-left:6px;">12 meses · só o que já foi gasto ou agendado · clique num mês para abrir o Raio-X</span></h4>
         </div>
-        <canvas id="ch-proj" class="chart-proj"></canvas>
+        <div class="proj-grafico"><canvas id="ch-proj" role="img" aria-label="Comprometido por mês nos próximos 12 meses"></canvas></div>
         <div class="proj-legend" id="proj-legend"></div>
         <div class="proj-camadas" id="proj-camadas"></div>
       </div>
 
       <!-- alívio das parcelas: quanto pesa em cada mês e quando cada parcela sai -->
       <div class="panel">
-        <h4 style="margin:0 0 4px;">ALÍVIO DAS PARCELAS <span class="muted" style="font-size:11px; text-transform:none">quanto de parcela pesa em cada mês e quando cada uma sai · só o que já foi comprado</span></h4>
+        <h4 style="margin:0 0 4px;">ALÍVIO DAS PARCELAS <span class="muted" style="font-size:11px; text-transform:none; margin-left:6px;">quanto de parcela pesa em cada mês e quando cada uma sai · só o que já foi comprado</span></h4>
         <div class="alivio-leitura" id="alivio-leitura"></div>
         <div class="proj-legend" id="alivio-legenda"></div>
         <div class="alivio-grafico"><canvas id="ch-alivio" role="img" aria-label="Parcelas por mês, por cartão"></canvas></div>

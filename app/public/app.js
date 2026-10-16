@@ -1258,10 +1258,10 @@ async function loadProjecao() {
   // camadas — regra de 15/10/2026: só comprometimento real (gasto ou agendado), nenhuma média ou previsão
   const fatM1 = (m1.faturas || []).map(f => `${f.cartao} ${fmt(f.total)}${f.status === 'fechada' ? ' (oficial)' : ' (até hoje)'}`).join(' · ');
   document.getElementById('proj-camadas').innerHTML = `
-    <div class="camadas-row"><span class="dot" style="background:#ff4d5e"></span><b>Faturas de cartão</b> ${fmt(m1.parcelas_cartao)}<span class="muted">— fechada = total oficial da AUVP; aberta = compras já lançadas + parcelas programadas (o mesmo valor do app do banco). ${fatM1}</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#4dabff"></span><b>Contas fixas</b> ${fmt(m1.fixos)}<span class="muted">— ${m1.origem_contas === 'contas do mês' ? 'contas do mês' : 'recorrências'}; conta de valor variável ainda não chegada entra com o último valor pago</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#f28b5b"></span><b>Parcelados</b> ${fmt(m1.parcelas_externas)}<span class="muted">— parcelamentos fora do cartão, calculados pela data da 1ª parcela</span></div>
-    <div class="camadas-row"><span class="dot" style="background:#b388ff"></span><b>Dia a dia já gasto</b> ${fmt(m1.dia_a_dia || 0)}<span class="muted">— só no mês atual: PIX e débito que saíram sem pagar nenhuma conta</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#c98500"></span><b>Faturas de cartão</b> ${fmt(m1.parcelas_cartao)}<span class="muted">— fechada = total oficial da AUVP; aberta = compras já lançadas + parcelas programadas (o mesmo valor do app do banco). ${fatM1}</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#3987e5"></span><b>Contas fixas</b> ${fmt(m1.fixos)}<span class="muted">— ${m1.origem_contas === 'contas do mês' ? 'contas do mês' : 'recorrências'}; conta de valor variável ainda não chegada entra com o último valor pago</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#d55181"></span><b>Parcelados</b> ${fmt(m1.parcelas_externas)}<span class="muted">— parcelamentos fora do cartão, calculados pela data da 1ª parcela</span></div>
+    <div class="camadas-row"><span class="dot" style="background:#9085e9"></span><b>Dia a dia já gasto</b> ${fmt(m1.dia_a_dia || 0)}<span class="muted">— só no mês atual: PIX e débito que saíram sem pagar nenhuma conta</span></div>
     <div class="camadas-row"><span class="dot" style="background:#00d68f"></span><b>Renda do mês</b> ${fmt(m1.renda)}<span class="muted">— por competência: renda que cai no fim do mês pode contar para o mês seguinte (configurável em cada renda); o que já caiu vale o valor real</span></div>
     <div class="camadas-row"><span class="dot" style="background:#00d68f"></span><b>Sobra livre</b> ${fmt(m1.sobra_livre)}<span class="muted">— renda − comprometido; nada aqui é previsão</span></div>`;
   const _btnAuvp = document.getElementById('proj-btn-auvp');
@@ -1281,29 +1281,37 @@ async function loadProjecao() {
   // rendas agora moram na aba Configurar (renderizadas em loadConfigurar)
   await renderRendasConfig(p.rendas || []);
 
-  // legenda HTML custom
+  // legenda HTML — cores validadas no fundo #10161f; "Parcelados" usa a mesma cor de "Fora do cartão" no Alívio
+  const COR_PROJ = { fixos: '#3987e5', faturas: '#c98500', parcelados: '#d55181', dia: '#9085e9', sobra: '#00d68f' };
+  const temDiaADia = serieV2.some(s => s.dia_a_dia > 0);
+  const estourou = serieV2.some(s => s.sobra_livre < 0);
   const LEGENDA = [
-    { cor: '#4dabff', label: 'Fixos' },
-    { cor: '#ff4d5e', label: 'Faturas de cartão' },
-    { cor: '#f28b5b', label: 'Parcelados' },
-    { cor: '#b388ff', label: 'Dia a dia já gasto' },
-    { cor: 'rgba(0,214,143,.6)', label: 'Sobra livre' }
+    { cor: COR_PROJ.fixos, label: 'Contas fixas' },
+    { cor: COR_PROJ.faturas, label: 'Faturas de cartão' },
+    { cor: COR_PROJ.parcelados, label: 'Parcelados' },
+    ...(temDiaADia ? [{ cor: COR_PROJ.dia, label: 'Dia a dia já gasto' }] : []),
+    { cor: 'rgba(0,214,143,.10)', borda: COR_PROJ.sobra, label: 'Sobra livre (o topo é a renda do mês)' }
   ];
   document.getElementById('proj-legend').innerHTML = LEGENDA.map(l =>
-    `<span class="leg-item"><i style="background:${l.cor}"></i>${l.label}</span>`).join('');
+    `<span class="leg-item"><i style="background:${l.cor};${l.borda ? ` box-shadow: inset 0 2px 0 ${l.borda};` : ''}"></i>${l.label}</span>`).join('');
 
+  const segmento = (label, data, cor) => ({
+    label, data, backgroundColor: cor, borderColor: '#10161f', borderWidth: { top: 2 }, borderSkipped: 'bottom', maxBarThickness: 48, stack: 'a'
+  });
   if (chartProj) chartProj.destroy();
   chartProj = new Chart(document.getElementById('ch-proj'), {
     type: 'bar',
     data: {
-      labels: serieV2.map(s => mesCurto(s.mes)),
+      labels: serieV2.map((s, i) => (i === 0 ? [mesCurto(s.mes), 'atual'] : mesCurto(s.mes))),
       datasets: [
-        { label: 'Fixos', data: serieV2.map(s => s.fixos), backgroundColor: '#4dabff', stack: 'a' },
-        { label: 'Faturas de cartão', data: serieV2.map(s => s.parcelas_cartao), backgroundColor: '#ff4d5e', stack: 'a' },
-        { label: 'Parcelados', data: serieV2.map(s => s.parcelas_externas), backgroundColor: '#f28b5b', stack: 'a' },
-        { label: 'Dia a dia já gasto', data: serieV2.map(s => s.dia_a_dia || 0), backgroundColor: '#b388ff', stack: 'a' },
-        { label: 'Sobra livre', data: serieV2.map(s => Math.max(0, s.sobra_livre)), backgroundColor: 'rgba(0,214,143,.35)', stack: 'a' },
-        { label: 'Renda', type: 'line', data: serieV2.map(s => s.renda), borderColor: '#00d68f', borderDash: [6, 4], pointRadius: 0, order: 0 }
+        segmento('Contas fixas', serieV2.map(s => s.fixos), COR_PROJ.fixos),
+        segmento('Faturas de cartão', serieV2.map(s => s.parcelas_cartao), COR_PROJ.faturas),
+        segmento('Parcelados', serieV2.map(s => s.parcelas_externas), COR_PROJ.parcelados),
+        ...(temDiaADia ? [segmento('Dia a dia já gasto', serieV2.map(s => s.dia_a_dia || 0), COR_PROJ.dia)] : []),
+        { label: 'Sobra livre', data: serieV2.map(s => Math.max(0, s.sobra_livre)), backgroundColor: 'rgba(0,214,143,.10)',
+          borderColor: COR_PROJ.sobra, borderWidth: { top: 2 }, borderSkipped: 'bottom', maxBarThickness: 48, stack: 'a' },
+        // a linha da renda só aparece se algum mês passar da renda (senão o topo da sobra já é a renda)
+        ...(estourou ? [{ label: 'Renda', type: 'line', data: serieV2.map(s => s.renda), borderColor: COR_PROJ.sobra, borderWidth: 2, stepped: 'middle', pointRadius: 0, order: 0 }] : [])
       ]
     },
     options: {
@@ -1312,10 +1320,10 @@ async function loadProjecao() {
       devicePixelRatio: 2,
       animation: false,
       interaction: { mode: 'index', intersect: false },
+      onHover: (evt, elems) => { evt.native.target.style.cursor = elems.length ? 'pointer' : 'default'; },
       onClick: (evt, elems) => {
         if (!elems.length) return;
-        const idx = elems[0].index;
-        const s = serieV2[idx];
+        const s = serieV2[elems[0].index];
         if (s) abrirDrillParcelas(s.mes);
       },
       plugins: {
@@ -1324,19 +1332,21 @@ async function loadProjecao() {
           enabled: false,
           external: projTooltipHTML,
           callbacks: {
-            title: items => items[0]?.label || '',
+            title: items => { const i = items[0]?.dataIndex ?? 0; return mesCurto(serieV2[i]?.mes || '') + (i === 0 ? ' · mês atual' : ''); },
             label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`,
             footer: items => {
               const s = serieV2[items[0]?.dataIndex];
               if (!s) return '';
-              return `Comprometido: ${fmt(s.comprometido)}  ·  Sobra livre: ${fmt(s.sobra_livre)}`;
+              return `Comprometido ${fmt(s.comprometido)} (${s.pct_comprometido}% da renda) · Renda ${fmt(s.renda)} · Sobra livre ${fmt(s.sobra_livre)}`;
             }
           }
         }
       },
       scales: {
-        y: { stacked: true, ticks: { color: '#a8bcd2', font: { size: 13, weight: '600' } } },
-        x: { stacked: true, ticks: { color: '#a8bcd2', font: { size: 13, weight: '600' } } }
+        y: { stacked: true, grid: { color: 'rgba(255,255,255,.05)' }, border: { display: false },
+          ticks: { color: '#a8bcd2', font: { size: 13, weight: '600' }, callback: v => (v >= 1000 ? (v / 1000).toLocaleString('pt-BR') + ' mil' : v) } },
+        x: { stacked: true, grid: { display: false },
+          ticks: { color: c => (c.index === 0 ? '#dbe4ee' : '#a8bcd2'), font: c => ({ size: 13, weight: c.index === 0 ? '700' : '600' }), maxRotation: 0, autoSkip: true } }
       }
     }
   });
@@ -2412,19 +2422,15 @@ function projTooltipHTML(context) {
   }
   if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
   const items = tooltip.dataPoints || [];
-  const cor = { 'Fixos': '#4dabff', 'Parcelas de cartão': '#ff4d5e', 'Parcelas externas': '#f28b5b', 'Sobra livre': '#00d68f' };
   const visivel = items.filter(i => i.raw != null && i.raw > 0 && i.dataset.label !== 'Renda');
   el.innerHTML = `
     <div class="pt-title">${tooltip.title || ''}</div>
     ${visivel.map(i => {
-      let lbl = i.dataset.label;
-      if (lbl === 'Parcelas de cartão' && i.dataIndex === 0) {
-        lbl = 'Faturas Abertas (cartões)';
-      }
-      return `<div class="pt-row"><i style="background:${cor[i.dataset.label] || '#64788f'}"></i>${lbl}<b>${fmt(i.parsed.y)}</b></div>`;
+      const corSeg = i.dataset.label === 'Sobra livre' ? '#00d68f' : (i.dataset.backgroundColor || '#64788f');
+      return `<div class="pt-row"><i style="background:${corSeg}"></i>${i.dataset.label}<b>${fmt(i.parsed.y)}</b></div>`;
     }).join('')}
     ${tooltip.footer?.[0] ? `<div class="pt-footer">${tooltip.footer[0]}</div>` : ''}
-    <div style="margin-top:8px; padding-top:6px; border-top:1px dashed rgba(255,255,255,.12); font-size:11px; color:#4dabff; text-align:center;">💡 Clique na barra para o Raio-X 360°</div>`;
+    <div style="margin-top:8px; padding-top:6px; border-top:1px dashed rgba(255,255,255,.12); font-size:11px; color:var(--muted); text-align:center;">Clique para abrir o Raio-X do mês</div>`;
   el.style.opacity = '1';
   const rect = chart.canvas.getBoundingClientRect();
   let x = rect.left + tooltip.caretX + 16;
@@ -2432,6 +2438,8 @@ function projTooltipHTML(context) {
   const w = el.offsetWidth, h = el.offsetHeight;
   if (x + w > window.innerWidth - 10) x = rect.left + tooltip.caretX - w - 16;
   if (y + h > window.innerHeight - 10) y = window.innerHeight - h - 10;
+  x = Math.max(8, Math.min(x, window.innerWidth - w - 8)); // celular: nunca sai da tela
+  y = Math.max(8, y);
   el.style.left = x + 'px';
   el.style.top = y + 'px';
 }
