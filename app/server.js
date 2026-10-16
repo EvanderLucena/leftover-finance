@@ -1045,22 +1045,49 @@ app.get('/api/contas-mes-reconciliar', (req, res) => {
   res.json(require('./scripts/conciliacao').contasDoMesComCandidatos(MES_ATUAL()));
 });
 
+// uma conta do mês, com o pagamento ligado (janela da conta em Contas do mês)
+app.get('/api/lancamentos/:id(\\d+)', (req, res) => {
+  const l = db.prepare(`SELECT l.*, c.nome categoria, m.ref mes_ref, r.tipo rec_tipo, r.padrao_busca,
+      t.descricao transacao_desc, t.data transacao_data, t.fonte transacao_fonte, t.valor transacao_valor
+    FROM lancamentos l JOIN meses m ON m.id = l.mes_id
+    LEFT JOIN categorias c ON c.id = l.categoria_id
+    LEFT JOIN recorrencias r ON r.id = l.recorrencia_id
+    LEFT JOIN transacoes t ON t.id = l.transacao_id
+    WHERE l.id = ?`).get(req.params.id);
+  if (!l) return res.status(404).json({ erro: 'não encontrado' });
+  l.tipo_gasto = l.categoria === 'Cartões' ? 'fatura' : (l.parcela ? 'parcela' : 'fixo');
+  res.json(l);
+});
+
+// pagamentos que podem ter quitado a conta: só saídas da conta corrente (compra no cartão já está na fatura),
+// do que mais combina para o que menos combina (mesma regra da conciliação: nome, valor e data)
 app.get('/api/lancamentos/:id/candidatos', (req, res) => {
-  const l = db.prepare('SELECT * FROM lancamentos WHERE id=?').get(req.params.id);
+  const l = db.prepare('SELECT l.*, r.padrao_busca FROM lancamentos l LEFT JOIN recorrencias r ON r.id = l.recorrencia_id WHERE l.id=?').get(req.params.id);
   if (!l) return res.json([]);
   const busca = (req.query.busca || '').toLowerCase();
+  const fc = fontesCartao();
   let sql = `SELECT id, data, descricao, valor, fonte FROM transacoes
     WHERE valor < 0 AND (natureza IN ('gasto', 'transferencia') OR natureza IS NULL)
+      AND fonte NOT IN (${fc.map(() => '?').join(',')})
       AND data >= date(?, '-35 days') AND data <= date(?, '+35 days') AND data <= date('now')
       AND id NOT IN (SELECT transacao_id FROM conciliacoes_recusadas_par WHERE lancamento_id = ?)
       AND id NOT IN (SELECT transacao_id FROM lancamentos WHERE transacao_id IS NOT NULL AND id != ?)`;
-  const params = [l.vencimento, l.vencimento, l.id, l.id];
+  const params = [...fc, l.vencimento, l.vencimento, l.id, l.id];
   if (busca) {
     sql += ' AND (descricao LIKE ? OR observacao LIKE ?)';
     params.push('%' + busca + '%', '%' + busca + '%');
   }
-  sql += ' ORDER BY data DESC, id DESC LIMIT 50';
-  res.json(db.prepare(sql).all(...params));
+  const { avaliarPar } = require('./scripts/conciliacao');
+  const ordem = { certo: 0, sugerido: 1 };
+  const out = db.prepare(sql).all(...params).map(t => {
+    const a = avaliarPar(l, t);
+    const difVal = Math.round((Math.abs(t.valor) - Math.abs(l.valor)) * 100) / 100;
+    const difData = Math.round((Date.parse(t.data) - Date.parse(l.vencimento)) / 864e5);
+    return { ...t, nivel: a ? a.nivel : null, dif_valor: difVal,
+      score: a ? a.score : Math.abs(difVal) + Math.abs(difData) * 2 + 40, _o: a ? ordem[a.nivel] : 2 };
+  }).sort((x, y) => x._o - y._o || x.score - y.score).slice(0, busca ? 40 : 25);
+  out.forEach(t => { delete t._o; delete t.score; });
+  res.json(out);
 });
 
 app.post('/api/contas-mes-reconciliar/anexar', (req, res) => {

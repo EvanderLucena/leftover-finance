@@ -1536,17 +1536,17 @@ function renderTabelaMes() {
     // transação anexada (fonte da verdade do pagamento)
     const tx = l.pago
       ? (l.transacao_id && l.transacao_desc
-        ? `<div class="tx-anexada" title="clique pra trocar a transação anexada" style="cursor:pointer" onclick="event.stopPropagation(); anexarPagamentoPago(${l.id})">↳ ${l.transacao_desc.slice(0, 34)} <span class="muted">${(l.transacao_data || '').slice(5)} · ${(l.transacao_fonte || '').replace('auvp-', 'auvp ')}</span> <span style="color:var(--blue); font-size:10px;">[trocar]</span></div>`
-        : `<div class="tx-anexada sem" title="clique pra anexar a transação que pagou" style="cursor:pointer" onclick="event.stopPropagation(); anexarPagamentoPago(${l.id})">↳ <span class="muted">marcado pago sem extrato</span> <span style="color:var(--blue); font-size:10px;">[anexar]</span></div>`)
+        ? `<div class="tx-anexada" title="clique pra trocar a transação anexada" style="cursor:pointer" onclick="event.stopPropagation(); abrirConta(${l.id})">↳ ${l.transacao_desc.slice(0, 34)} <span class="muted">${(l.transacao_data || '').slice(5)} · ${(l.transacao_fonte || '').replace('auvp-', 'auvp ')}</span> <span style="color:var(--blue); font-size:10px;">[trocar]</span></div>`
+        : `<div class="tx-anexada sem" title="clique pra anexar a transação que pagou" style="cursor:pointer" onclick="event.stopPropagation(); abrirConta(${l.id})">↳ <span class="muted">marcado pago sem extrato</span> <span style="color:var(--blue); font-size:10px;">[anexar]</span></div>`)
       : '';
-    return `<tr style="${urgente}; cursor:pointer" ondblclick="editarLanc(${l.id})" title="Duplo clique para editar">
-      <td><span class="badge ${st}" style="cursor:pointer; user-select:none;" onclick="event.stopPropagation(); togglePago(${l.id})" title="${l.pago ? 'Clique para desmarcar' : 'Clique para anexar pagamento'}">${st.toUpperCase()}</span></td>
+    return `<tr class="linha-conta" style="${urgente}; cursor:pointer" onclick="abrirConta(${l.id})" title="Clique para ver o pagamento ou editar">
+      <td><span class="badge ${st}" style="cursor:pointer; user-select:none;" onclick="event.stopPropagation(); abrirConta(${l.id})">${st.toUpperCase()}</span></td>
       <td><div class="lanc-nome"><b>${l.descricao}</b> ${l.parcela ? `<span class="muted">(${l.parcela})</span>` : ''} ${badgeTipo}</div>${tx}</td>
       <td class="mono" style="font-weight:600">${fmt(l.valor)}</td>
       <td class="muted mono">${fmtD(l.vencimento)}</td>
       <td>${l.categoria ? `<span class="tag">${l.categoria}</span>` : '<span class="muted">—</span>'}</td>
       <td style="text-align:right; white-space:nowrap;">
-        <button class="ghost" style="padding:4px 8px; font-size:12px; margin-right:4px;" onclick="event.stopPropagation(); editarLanc(${l.id})" title="Editar">${ico('note')}</button>
+        <button class="ghost" style="padding:4px 8px; font-size:12px; margin-right:4px;" onclick="event.stopPropagation(); abrirConta(${l.id}, null, { editar: true })" title="Editar">${ico('note')}</button>
         <button class="ghost" style="padding:4px 8px; font-size:12px; color:var(--red);" onclick="event.stopPropagation(); delLanc(${l.id})" title="Excluir">${ico('trash')}</button>
       </td>
     </tr>`;
@@ -1604,6 +1604,7 @@ function addDays(dateStr, days) { const d = new Date(dateStr); d.setDate(d.getDa
 
 // dialog de edição de lançamento (novo ou existente)
 window.editarLanc = async function (id) {
+  if (id) return abrirConta(id, null, { editar: true }); // conta existente: janela da conta
   const cats = await api('/api/categorias');
   const f = document.getElementById('form-lanc');
   document.getElementById('f-categoria').innerHTML = '<option value="">—</option>' + cats.map(c => `<option>${c.nome}</option>`).join('');
@@ -1629,23 +1630,9 @@ window.editarLanc = async function (id) {
   }
   document.getElementById('dlg-lanc').showModal();
 };
-window.togglePago = async function (id) {
-  const rows = await api('/api/lancamentos?mes=' + mesAtual);
-  const l = rows.find(x => x.id === id);
-  if (!l) return;
-  // PAGANDO: abre dialog de anexar com opção de pular (não obrigatório)
-  if (!l.pago) { dialogAnexarPagamento(l, loadMes, { podePular: true }); return; }
-  // DESMARCANDO: volta a em aberto direto
-  await api('/api/lancamentos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: false, transacao_id: null }) });
-  loadMes();
-};
-// (re)anexar transação em conta JÁ PAGA — mesmo dialog, atualiza valor/data/vínculo
-window.anexarPagamentoPago = function (id) {
-  api('/api/lancamentos?mes=' + mesAtual).then(rows => {
-    const l = rows.find(x => x.id === id);
-    if (l) dialogAnexarPagamento(l, loadMes);
-  });
-};
+// status e pagamento ligado: tudo na janela da conta (abrirConta)
+window.togglePago = id => abrirConta(id);
+window.anexarPagamentoPago = id => abrirConta(id);
 window.delLanc = async function (id) {
   if (!confirm('Excluir lançamento?')) return;
   await api('/api/lancamentos/' + id, { method: 'DELETE' });
@@ -2019,75 +2006,7 @@ window.anexarConta = async function (lancId, txId) {
 };
 
 // ---------- dialog universal "anexar pagamento" (usado em Contas do mês e Reconciliar) ----------
-window.dialogAnexarPagamento = async function (lanc, aoConcluir, opts = {}) {
-  const podePular = opts.podePular !== false;
-  const modal = document.createElement('dialog');
-  modal.className = 'dlg-anexar';
-  modal.innerHTML = `
-    <div class="dlg-anexar-h">
-      <div>
-        <h3>${lanc.descricao} ${lanc.parcela || ''}</h3>
-        <p class="muted">previsto ${fmt(lanc.valor)} · venc ${lanc.vencimento} · escolha a transação que pagou essa conta</p>
-      </div>
-      <button class="dlg-x" title="fechar">${ico('x')}</button>
-    </div>
-    <input type="search" id="anx-busca" class="fselect" style="width:100%; margin-bottom:12px;" placeholder="buscar na descrição…">
-    <div class="dlg-anexar-lista" id="anx-lista"></div>
-    <div class="dlg-anexar-foot">
-      <span class="muted">a conta fica PAGA com a data da transação · valor atualizado pro real</span>
-      <button class="ghost" id="anx-pular">pular anexo — só marcar pago</button>
-      <button class="ghost" id="anx-naoachei">não achei — marcar pago sem transação</button>
-    </div>`;
-  document.body.appendChild(modal);
-  modal.showModal();
-  const lista = modal.querySelector('#anx-lista');
-  let itens = [];
-
-  async function carregar(busca) {
-    itens = await api(`/api/lancamentos/${lanc.id}/candidatos?busca=${encodeURIComponent(busca || '')}`);
-    if (!itens.length) { lista.innerHTML = `<div class="rec-empty">nenhuma transação ${busca ? 'com "' + busca + '"' : 'no período (±35 dias do vencimento)'}<br><span style="font-size:11px;">pagueu por outro canal? use o botão abaixo</span></div>`; return; }
-    lista.innerHTML = itens.map((t, i) => {
-      const dif = Math.abs(Math.abs(t.valor) - Math.abs(lanc.valor));
-      const dtFmt = t.data ? (t.data.slice(8, 10) + '/' + t.data.slice(5, 7)) : '';
-      return `<button class="anx-item" data-id="${t.id}" style="animation-delay:${Math.min(i * 20, 300)}ms">
-        <span class="anx-desc">${t.descricao.slice(0, 42)}</span>
-        <span class="anx-meta">${dtFmt} · ${(t.fonte || '').replace('auvp-', 'auvp ')}</span>
-        <span class="anx-val">${fmt(t.valor)}</span>
-        ${dif > 0.01 ? `<span class="anx-dif" title="conta será atualizada pro valor pago">±${fmt(dif)}</span>` : '<span class="anx-dif ok">exato</span>'}
-      </button>`;
-    }).join('');
-    lista.querySelectorAll('.anx-item').forEach(b => b.onclick = () => escolher(Number(b.dataset.id)));
-  }
-  async function escolher(txId) {
-    const r = await api('/api/contas-mes-reconciliar/anexar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lancamento_id: lanc.id, transacao_id: txId }) });
-    if (r.erro) { toast('Erro: ' + r.erro); return; }
-    modal.remove();
-    toast(r.valorAtualizado ? 'PAGA — valor atualizado pro real + padrão aprendido' : 'PAGA — padrão aprendido');
-    aoConcluir && aoConcluir();
-  }
-  modal.querySelector('#anx-busca').oninput = e => { clearTimeout(modal._t); modal._t = setTimeout(() => carregar(e.target.value), 250); };
-  modal.querySelector('.dlg-x').onclick = () => modal.remove();
-  if (podePular) {
-    modal.querySelector('#anx-pular').onclick = async () => {
-      await api('/api/lancamentos/' + lanc.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: true }) });
-      modal.remove();
-      toast('PAGA (sem transação anexada — pode anexar depois clicando nela)');
-      aoConcluir && aoConcluir();
-    };
-  } else {
-    const p = modal.querySelector('#anx-pular');
-    if (p) p.remove();
-  }
-  modal.querySelector('#anx-naoachei').onclick = async () => {
-    const btn = modal.querySelector('#anx-naoachei');
-    if (btn.dataset.conf !== '1') { btn.textContent = 'confirmar: pagar sem transação anexada?'; btn.dataset.conf = '1'; btn.style.color = 'var(--amber)'; return; }
-    await api('/api/lancamentos/' + lanc.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: true }) });
-    modal.remove();
-    toast('PAGA (sem transação anexada)');
-    aoConcluir && aoConcluir();
-  };
-  await carregar('');
-};
+window.dialogAnexarPagamento = (lanc, aoConcluir) => abrirConta(lanc.id, aoConcluir);
 
 // ---------- CONFIGURAR ----------
 // drill-down: Raio-X 360 do mês (clique na barra da projeção)
@@ -3056,4 +2975,147 @@ async function renderFixasRecorrentes() {
   if (!el) return;
   const sug = await renderSugestoesFixas(el, () => loadRecorrentes());
   el.closest('.panel').hidden = !sug.length;
+}
+
+// ---------- janela da conta do mês: pagamento em cima, detalhes embaixo ----------
+const DIAS_SEM = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const dataCurta = iso => { if (!iso) return ''; const d = new Date(iso + 'T12:00:00'); return `${DIAS_SEM[d.getDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}`; };
+const ondeFoi = fonte => (fonte === 'auvp-mcp' ? 'cartão' : fonte === 'manual' ? 'manual' : 'conta');
+
+async function abrirConta(id, aoMudar, opts = {}) {
+  const depois = () => { (aoMudar || loadMes)(); };
+  let l;
+  try { l = await api('/api/lancamentos/' + id); } catch (e) { return toast(e.message); }
+  const cats = await api('/api/categorias').catch(() => []);
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const st = l.pago ? 'pago' : (l.vencimento < hoje ? 'vencido' : 'aberto');
+  const tipo = l.tipo_gasto === 'fatura' ? ['cartão', 'tp-fatura'] : l.tipo_gasto === 'parcela' ? ['parcela', 'tp-parcela'] : ['fixo', 'tp-fixo'];
+
+  const modal = document.createElement('dialog');
+  modal.className = 'dlg-conta';
+  modal.innerHTML = `
+    <div class="dc-topo">
+      <div class="dc-titulo">
+        <h3>${esc(l.descricao)} ${l.parcela ? `<span class="muted">${esc(l.parcela)}</span>` : ''}</h3>
+        <div class="dc-sub">
+          <span class="badge ${st}">${st.toUpperCase()}</span>
+          <span class="tipo-badge ${tipo[1]}">${tipo[0]}</span>
+          <span class="mono dc-valor">${fmt(l.valor)}</span>
+          <span class="muted">vence ${dataCurta(l.vencimento)}</span>
+        </div>
+      </div>
+      <button class="ghost dc-x" title="Fechar">${ico('x')}</button>
+    </div>
+    <section class="dc-pag"></section>
+    <details class="dc-det" ${opts.editar ? 'open' : ''}>
+      <summary>Editar detalhes da conta</summary>
+      <form class="dc-form">
+        <label class="dc-full">Nome<input name="descricao" value="${esc(l.descricao)}" required></label>
+        <label>Valor (R$)<input name="valor" type="number" step="0.01" value="${l.valor}" required></label>
+        <label>Vencimento<input name="vencimento" type="date" value="${l.vencimento}" required></label>
+        <label>Categoria<select name="categoria"><option value="">—</option>${cats.map(c => `<option ${c.nome === l.categoria ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label>
+        <label>Parcela<input name="parcela" value="${esc(l.parcela || '')}" placeholder="ex.: 2/12"></label>
+        <label class="dc-full">Observação<input name="observacao" value="${esc(l.observacao || '')}" placeholder="opcional"></label>
+        <div class="dc-full dc-form-acoes"><button class="cta" type="submit">Salvar alterações</button></div>
+      </form>
+    </details>
+    <div class="dc-rodape">
+      <button class="ghost dc-excluir">${ico('trash')} Excluir conta</button>
+      <button class="ghost dc-fechar">Fechar</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.showModal();
+  const fechar = () => { modal.close(); modal.remove(); };
+  modal.addEventListener('close', () => modal.remove());
+  modal.querySelector('.dc-x').onclick = fechar;
+  modal.querySelector('.dc-fechar').onclick = fechar;
+  modal.addEventListener('click', e => { if (e.target === modal) fechar(); }); // clique fora fecha
+
+  const pag = modal.querySelector('.dc-pag');
+  const put = body => api('/api/lancamentos/' + l.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  // conta paga: mostra com o quê; dá para trocar ou desfazer
+  function mostrarPago() {
+    pag.innerHTML = l.transacao_id ? `
+      <div class="dc-pago">
+        <div class="dc-pago-ic">${ico('check')}</div>
+        <div class="dc-pago-txt">
+          <b>Paga ${dataCurta(l.transacao_data || l.pago_em)}</b>
+          <span>${esc(l.transacao_desc || '')}</span>
+          <span class="muted">${fmt(Math.abs(l.transacao_valor || l.valor))} · saiu da ${ondeFoi(l.transacao_fonte)}</span>
+        </div>
+      </div>
+      <div class="dc-acoes"><button class="ghost dc-trocar">Trocar pagamento</button><button class="ghost dc-desfazer">Desfazer: voltar para em aberto</button></div>`
+      : `
+      <div class="dc-pago sem">
+        <div class="dc-pago-ic">${ico('check')}</div>
+        <div class="dc-pago-txt"><b>Marcada como paga${l.pago_em ? ' ' + dataCurta(l.pago_em) : ''}</b><span class="muted">sem um pagamento do extrato ligado</span></div>
+      </div>
+      <div class="dc-acoes"><button class="ghost dc-trocar">Ligar a um pagamento do extrato</button><button class="ghost dc-desfazer">Desfazer: voltar para em aberto</button></div>`;
+    pag.querySelector('.dc-trocar').onclick = () => escolherPagamento(true);
+    pag.querySelector('.dc-desfazer').onclick = async () => {
+      await put({ pago: false, transacao_id: null });
+      toast('Conta voltou para em aberto'); fechar(); depois();
+    };
+  }
+
+  // conta em aberto (ou trocando): qual pagamento quitou?
+  async function escolherPagamento(trocando) {
+    pag.innerHTML = `
+      <h4 class="dc-h">${trocando ? 'Escolha o pagamento certo' : 'Já pagou? Escolha o pagamento que quitou esta conta'}</h4>
+      <input type="search" class="fselect dc-busca" placeholder="buscar outro pagamento no extrato…">
+      <div class="dc-lista"></div>
+      <div class="dc-acoes">
+        ${trocando ? '<button class="ghost dc-voltar">Cancelar troca</button>' : ''}
+        <button class="ghost dc-sem">Paguei por fora (dinheiro, outro app) — marcar como paga</button>
+      </div>`;
+    const lista = pag.querySelector('.dc-lista');
+    async function carregar(busca) {
+      lista.innerHTML = '<div class="muted dc-vazio">carregando…</div>';
+      const itens = await api(`/api/lancamentos/${l.id}/candidatos?busca=${encodeURIComponent(busca || '')}`).catch(() => []);
+      if (!itens.length) { lista.innerHTML = `<div class="muted dc-vazio">Nenhum pagamento ${busca ? `com "${esc(busca)}"` : 'da conta corrente perto do vencimento'}.</div>`; return; }
+      lista.innerHTML = itens.map((t, i) => {
+        const dif = t.dif_valor;
+        const chip = Math.abs(dif) < 0.01 ? '<span class="dc-chip ok">valor exato</span>'
+          : `<span class="dc-chip">${dif > 0 ? '+' : '−'}${fmt(Math.abs(dif))}</span>`;
+        const prov = !busca && i === 0 && t.nivel === 'certo' ? '<span class="dc-prov">mais provável</span>' : '';
+        return `<button class="dc-item ${prov ? 'prov' : ''}" data-id="${t.id}">
+          <span class="dc-item-desc">${prov}${esc(t.descricao)}</span>
+          <span class="dc-item-meta">${dataCurta(t.data)} · ${ondeFoi(t.fonte)}</span>
+          <span class="dc-item-val mono">${fmt(Math.abs(t.valor))}</span>${chip}
+        </button>`;
+      }).join('');
+      lista.querySelectorAll('.dc-item').forEach(b => {
+        b.onclick = async () => {
+          const r = await api('/api/contas-mes-reconciliar/anexar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lancamento_id: l.id, transacao_id: Number(b.dataset.id) }) }).catch(e => ({ erro: e.message }));
+          if (r.erro) return toast(r.erro);
+          toast(r.valorAtualizado ? 'Paga — valor da conta ajustado para o que saiu' : 'Paga');
+          fechar(); depois();
+        };
+      });
+    }
+    let t0;
+    pag.querySelector('.dc-busca').oninput = e => { clearTimeout(t0); t0 = setTimeout(() => carregar(e.target.value), 250); };
+    pag.querySelector('.dc-sem').onclick = async () => { await put({ pago: true }); toast('Marcada como paga'); fechar(); depois(); };
+    const v = pag.querySelector('.dc-voltar');
+    if (v) v.onclick = mostrarPago;
+    await carregar('');
+  }
+
+  modal.querySelector('.dc-form').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    await put({
+      descricao: f.descricao.value.trim(), valor: parseFloat(f.valor.value), vencimento: f.vencimento.value,
+      categoria: f.categoria.value || null, parcela: f.parcela.value.trim() || null, observacao: f.observacao.value.trim() || null
+    });
+    toast('Conta salva'); fechar(); depois();
+  };
+  modal.querySelector('.dc-excluir').onclick = async () => {
+    if (!confirm(`Excluir "${l.descricao}" deste mês? A recorrente (se houver) continua gerando os próximos meses.`)) return;
+    await api('/api/lancamentos/' + l.id, { method: 'DELETE' });
+    toast('Conta excluída'); fechar(); depois();
+  };
+
+  if (l.pago) mostrarPago(); else await escolherPagamento(false);
 }
