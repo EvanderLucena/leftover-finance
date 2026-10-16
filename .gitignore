@@ -67,6 +67,7 @@ app/scripts/*
 !app/scripts/conciliacao.js
 !app/scripts/contas.js
 !app/scripts/motor-regras.js
+!app/scripts/nova-senha.js
 !app/scripts/regras-seed.js
 !app/scripts/renda-realizada.js
 !app/scripts/saldos.js

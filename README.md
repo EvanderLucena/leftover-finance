@@ -52,8 +52,12 @@ Sobra Real Livre     = O valor que você realmente tem disponível para poupar o
 ### 3. 🏦 Open Finance pela AUVP (qualquer banco)
 - **Sincronização automática:** contas, cartões, saldos, faturas oficiais e transações vêm do MCP da AUVP. Funciona com qualquer banco conectado lá; nenhum banco fica fixo no código.
 - **Contas e cartões descobertos sozinhos:** cada conta ou cartão novo na AUVP aparece em Configurar, com fechamento e vencimento aprendidos das faturas.
-- **Rendas cadastradas por você:** salário fixo, por hora ou outra entrada, reconhecida pelo texto ou pelo valor do crédito.
+- **Rendas sugeridas pelo histórico:** o app acha as entradas que se repetem e pergunta se são renda; cada uma pode ser fixa, por hora, variável (média dos últimos 3 meses) ou eventual, reconhecida pelo texto ou pelo valor do crédito.
 - **Motor de Regras:** categorização e natureza financeira (`gasto`, `transferencia`, `transferencia-propria`, `salario`, `rendimento`, `ignorado`), com a categoria da AUVP quando nenhuma regra casa.
+
+### 4. 🧭 Primeira vez guiada e uso na casa toda
+- **Assistente:** cria usuário e senha, pede a chave da AUVP, confere cartões e rendas.
+- **Só este computador ou casa toda:** no segundo caso, abre no celular pelo Wi-Fi, sempre com login.
 
 ### 5. 🔒 Privacidade Absoluta & Segurança de Chaves
 - **100% Local:** Todo o armazenamento reside em um banco SQLite (`financas.db`) gerenciado pelo módulo nativo `node:sqlite`.
@@ -113,19 +117,21 @@ leftover-finance/
     ├── db.js                # Inicialização e schemas SQLite (node:sqlite)
     ├── package.json         # Dependências do Node.js
     ├── Dockerfile           # Imagem conteinerizada de produção
-    ├── docker-compose.yml   # Orquestração do App + Caddy (Reverse Proxy SSL)
-    ├── Caddyfile            # Configuração Caddy com autenticação básica
+    ├── docker-compose.yml   # App no Docker, aberto na rede de casa
     ├── .env.example         # Template de variáveis de ambiente
     ├── public/              # Frontend web estático
-    │   ├── index.html       # Estrutura SPA
+    │   ├── index.html       # Estrutura SPA (com o assistente da primeira vez)
+    │   ├── entrar.html      # Criar acesso / entrar
     │   ├── style.css        # Tema e estilos customizados
     │   ├── app.js           # Lógica do frontend
     │   ├── chart.umd.js     # Biblioteca gráfica Chart.js
     │   └── logo.svg         # Identidade visual
     ├── core/                # Núcleo: sincronização AUVP, faturas, comprometimento, calendário
+    │   ├── acesso.js        # Usuário e senha, sessão e "só este PC" ou "casa toda"
     │   ├── auvp-sync.js     # Contas, cartões, faturas e transações da AUVP
     │   ├── comprometido.js  # Motor único: faturas, contas, renda e sobra de cada mês
     │   ├── fontes.js        # Origem de cada transação (cartão ou conta)
+    │   ├── rendas.js        # Rendas: reconhecimento, sugestões do histórico, média das variáveis
     │   └── segredo.js       # Cofre local da chave da AUVP
     └── scripts/             # Módulos de apoio
         ├── auvp-client.js   # Cliente MCP da AUVP
@@ -140,61 +146,57 @@ leftover-finance/
 
 ## 💻 Instalação & Execução
 
-### Opção 1: Executando Localmente (Node.js)
+> **Projeto pessoal, aberto como está.** Use por sua conta; não há suporte. Fork e ajustes são bem-vindos.
 
-#### Pré-requisitos
-- **Node.js 22.5+** instalado (requer suporte a `node:sqlite`).
-- Gerenciador de pacotes **npm**.
+Você vai precisar de uma conta na **AUVP** com seus bancos e cartões conectados, e da **chave do MCP da AUVP** (começa com `auvp_`). O app só lê os dados; nada é pago ou transferido por ele.
+
+### Opção 1: No seu computador (Node.js)
+
+Pré-requisito: **Node.js 22.5+** (o app usa o `node:sqlite`, que vem no Node).
 
 ```bash
-# 1. Clone o repositório
 git clone https://github.com/EvanderLucena/leftover-finance.git
 cd leftover-finance/app
-
-# 2. Instale as dependências
 npm install
-
-# 3. Configure o arquivo de variáveis (opcional para teste local)
-cp .env.example .env
-
-# 4. Inicie o servidor
 npm start
 ```
 
-Acesse a interface no navegador: **`http://localhost:4321`** (ou a porta em `PORT`)
+Abra **`http://localhost:4321`**. Na primeira vez, o app:
 
----
+1. pede um **usuário e senha** (uma conta só, guardada no próprio computador);
+2. explica a AUVP e pede a **chave do MCP**, depois busca suas contas, cartões e transações;
+3. mostra os cartões com o **dia de fechamento e de vencimento** aprendidos das faturas, para você conferir;
+4. sugere as **rendas** a partir das entradas que se repetem no histórico (fixa, por hora, variável ou eventual);
+5. pergunta **onde você vai usar**:
+   - **Só neste computador**: o app só abre aqui (escuta em `127.0.0.1`).
+   - **Na casa toda**: abre no celular e em outros aparelhos do mesmo Wi-Fi, com usuário e senha; o app mostra o endereço (ex.: `http://192.168.0.10:4321`). No Windows, permita o Node.js em **Redes privadas** quando o firewall perguntar.
 
-### Opção 2: Executando via Docker Compose (Produção / Self-Hosted)
+Dá para trocar depois em **Configurar → Acesso**. Esqueceu a senha? No computador onde o app roda, rode `npm run nova-senha` na pasta `app`: o acesso é apagado (os dados ficam) e o app pede um novo na próxima vez.
 
-A aplicação conta com suporte nativo a Docker e proxy reverso Caddy, fornecendo HTTPS automático e camada de autenticação HTTP básica.
+### Opção 2: Docker (servidor em casa)
 
 ```bash
-# 1. Navegue até o diretório da aplicação
 cd leftover-finance/app
-
-# 2. Crie e ajuste o arquivo .env
-cp .env.example .env
-```
-
-Edite o arquivo `.env`:
-```env
-DOMAIN=financas.seu-dominio.com
-AUTH_USER=admin
-AUTH_PASS_HASH=$2a$14$...   # Gerado via: docker run --rm caddy:2 caddy hash-password --plaintext 'sua-senha'
-```
-
-Inicie os serviços conteinerizados:
-```bash
 docker compose up -d
+docker compose logs app    # mostra o código de instalação
 ```
+
+Abra `http://IP-DA-MÁQUINA:4321` e crie usuário e senha. Como o acesso não vem do próprio computador do app, a primeira tela pede o **código de instalação** que aparece no log. Os dados e o cofre da chave ficam em `app/data/`.
+
+- Para abrir só na própria máquina, troque a linha `ports` do `docker-compose.yml` para `"127.0.0.1:4321:4321"`.
+- Variáveis opcionais em `.env` (veja `.env.example`): `PORTA`, `FINANCA_ENDERECO` (endereço que o app mostra para o celular) e `AUVP_KEY`.
+
+### Acesso de fora de casa
+
+O app usa HTTP simples, pensado para a rede de casa. **Não abra a porta no roteador.** Para acessar da rua, use uma VPN como o [Tailscale](https://tailscale.com): instale no computador do app e no celular e abra o endereço do Tailscale na porta 4321.
 
 ---
 
-## 🔑 Segurança e Gestão de Chaves de API
+## 🔑 Segurança
 
-- **Nunca comite chaves de API:** a chave da AUVP é informada em **Configurar** (vai para o cofre local, não para o banco) ou pela variável `AUVP_KEY` no `.env` (ignorado pelo Git).
-- O servidor nunca expõe chaves privadas nas rotas de status da API; apenas sinalizadores booleanos (`temKey: true/false`) são retornados à interface.
+- **Senha do app**: guardada só como hash (scrypt). A sessão é um cookie `HttpOnly` de 90 dias; 5 senhas erradas seguidas bloqueiam aquele aparelho por 1 minuto.
+- **Chave da AUVP**: fica no cofre local (`core/segredo.js`): no Windows, protegida pela sua conta de usuário (DPAPI); no Linux/Docker, em arquivo com permissão só do dono. Nunca vai para o banco de dados nem para as respostas da API, que só dizem se ela existe.
+- **Dados financeiros**: ficam no SQLite local (`financas.db`), que o `.gitignore` nunca deixa entrar no Git.
 
 ---
 

@@ -32,28 +32,4 @@ node_modules/
 .env.*
 !.env.example
 
-# Scripts ad-hoc (mantém apenas scripts de produção)
-scripts/*
-!scripts/auvp-client.js
-!scripts/conciliacao.js
-!scripts/contas.js
-!scripts/faturas-abertas.js
-!scripts/heuristico.js
-!scripts/ia.js
-!scripts/identidade.js
-!scripts/import.js
-!scripts/insights-ia.js
-!scripts/insights.js
-!scripts/motor-regras.js
-!scripts/parcelas-futuras.js
-!scripts/parse-extrato.js
-!scripts/parse-itau.js
-!scripts/parse-mercadopago.js
-!scripts/parse-nubank.js
-!scripts/pdf.js
-!scripts/reconciliador.js
-!scripts/regras-seed.js
-!scripts/renda-realizada.js
-!scripts/saldos.js
-!scripts/super-parser.js
-!scripts/sync-diario.js
+# Scripts ad-hoc: a lista dos que entram no git fica no .gitignore da raiz

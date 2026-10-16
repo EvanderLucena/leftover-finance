@@ -41,6 +41,7 @@ let charts = {};
 
 async function api(url, opts) {
   const r = await fetch(url, opts);
+  if (r.status === 401) { location.href = '/entrar.html'; throw new Error('entre no app primeiro'); }
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.erro || r.statusText); }
   return r.json();
 }
@@ -1132,7 +1133,7 @@ async function loadProjecao() {
         <span class="num ${m1.sobra_livre > 0 ? 'up' : 'down'}">${fmt(m1.comprometido)}<small> (${pctComprometidoM1}% da renda)</small></span>
         <div class="ph-barra"><i style="width:${Math.min(100, Math.max(0, pctComprometidoM1))}%"></i></div>
         <span class="sub muted">
-          Faturas: ${fmt(m1.parcelas_cartao || 0)} · Fixos: ${fmt(m1.fixos || 0)} · Parcelados: ${fmt(m1.parcelas_externas || 0)}${m1.dia_a_dia ? ' · Dia a dia já gasto: ' + fmt(m1.dia_a_dia) : ''} · Renda: ${fmt(m1.renda)} · Sobra livre: <b class="up">${fmt(m1.sobra_livre)}</b>
+          Faturas: ${fmt(m1.parcelas_cartao || 0)} · Fixos: ${fmt(m1.fixos || 0)} · Parcelados: ${fmt(m1.parcelas_externas || 0)}${m1.dia_a_dia ? ' · Dia a dia já gasto: ' + fmt(m1.dia_a_dia) : ''} · Renda: ${fmt(m1.renda)} · Sobra livre: <b class="${m1.sobra_livre < 0 ? 'down' : 'up'}">${fmt(m1.sobra_livre)}</b>
         </span>
         <div class="ph-trajectory">
           <span>Só o que já foi gasto ou está agendado: o comprometido até hoje cai de <b>${pctComprometidoM1}%</b> (${mesCurto(m1.mes)}) para <b>${pctComprometidoM12}%</b> (${mesCurto(m12.mes)}) conforme as parcelas terminam. Compras novas entram quando acontecerem.</span>
@@ -2422,8 +2423,7 @@ const TIPO_RENDA = {
 };
 const jsonPost = (url, body, method = 'POST') => api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-async function renderRendasConfig() {
-  const el = document.getElementById('p-rendas');
+async function renderRendasConfig(el = document.getElementById('p-rendas')) {
   if (!el) return;
   const rendas = await api('/api/rendas').catch(() => []);
   el.innerHTML = (rendas.length ? '' : '<p class="muted" style="font-size:13px;">Nenhuma renda cadastrada ainda. Veja abaixo as entradas que se repetem no seu histórico, ou cadastre uma.</p>')
@@ -2450,8 +2450,8 @@ async function renderRendasConfig() {
       </div>
       <div class="muted renda-rodape">${r.tipo === 'eventual' ? 'Não entra na previsão' : 'Previsão por mês: ' + fmt(r.estimada || 0)}${r.observacao ? ' · ' + esc(r.observacao) : ''}</div>
     </div>`).join('')
-    + `<button class="ghost" id="btn-nova-renda" style="margin-top:4px;">${ico('plus')} Nova renda</button>
-       <div id="p-rendas-sug" style="margin-top:18px;"></div>`;
+    + `<button class="ghost btn-nova-renda" style="margin-top:4px;">${ico('plus')} Nova renda</button>
+       <div class="p-rendas-sug" style="margin-top:18px;"></div>`;
 
   el.querySelectorAll('.renda-item [data-field]').forEach(inp => {
     inp.onchange = async e => {
@@ -2464,7 +2464,7 @@ async function renderRendasConfig() {
       try {
         await jsonPost('/api/rendas/' + item.dataset.id, body, 'PUT');
         toast('Renda atualizada');
-        if (f === 'tipo' || f === 'corte' || f === 'valor_base' || f === 'valor_hora' || f === 'horas_previstas' || f === 'padrao_regex' || f === 'valor_exato') renderRendasConfig();
+        if (f === 'tipo' || f === 'corte' || f === 'valor_base' || f === 'valor_hora' || f === 'horas_previstas' || f === 'padrao_regex' || f === 'valor_exato') renderRendasConfig(el);
       } catch (err) { toast(err.message); }
     };
   });
@@ -2473,14 +2473,14 @@ async function renderRendasConfig() {
       const item = e.target.closest('.renda-item');
       if (!confirm('Remover esta renda? As transações continuam; ela só deixa de entrar nas contas do mês.')) return;
       await api('/api/rendas/' + item.dataset.id, { method: 'DELETE' });
-      renderRendasConfig();
+      renderRendasConfig(el);
     };
   });
-  document.getElementById('btn-nova-renda').onclick = novaRenda;
-  renderSugestoesRenda(document.getElementById('p-rendas-sug'), renderRendasConfig);
+  el.querySelector('.btn-nova-renda').onclick = () => novaRenda(() => renderRendasConfig(el));
+  renderSugestoesRenda(el.querySelector('.p-rendas-sug'), () => renderRendasConfig(el));
 }
 
-async function novaRenda() {
+async function novaRenda(aoMudar) {
   const nome = prompt('Nome da renda (ex.: Salário, Aluguel recebido):');
   if (!nome) return;
   const texto = prompt('Como ela aparece no extrato? Digite um pedaço do texto (ex.: o nome da empresa).\nSe ela vem cada vez com um texto diferente mas sempre com o mesmo valor, deixe em branco.');
@@ -2491,7 +2491,7 @@ async function novaRenda() {
     if (!isFinite(v) || v <= 0) return toast('Sem texto nem valor não dá para reconhecer a renda');
     body.valor_exato = v; body.valor_base = v;
   }
-  try { await jsonPost('/api/rendas', body); toast('Renda cadastrada — ajuste o tipo e o valor'); renderRendasConfig(); }
+  try { await jsonPost('/api/rendas', body); toast('Renda cadastrada — ajuste o tipo e o valor'); aoMudar(); }
   catch (err) { toast(err.message); }
 }
 
@@ -2708,6 +2708,7 @@ if (document.getElementById('modal-conta-salvar')) {
 }
 
 async function loadConfigurar() {
+  renderAcessoConfig();
   // Contas e Cartões
   const todasContas = await api('/api/contas?todas=1').catch(() => []);
   renderContasConfig(todasContas);
@@ -2800,4 +2801,150 @@ async function atualizarTopo() {
   if (f) f.textContent = 'Recorrências · Contas do mês · Projeção · Reconciliar';
 }
 // abre direto na Projeção (decisão de 15/10: só o core no menu)
-loadMeses().then(() => { loadProjecao(); atualizarTopo(); });
+// primeira inicialização: o assistente monta o painel antes; depois abre direto na Projeção
+abrirAssistente().then(aberto => { if (!aberto) loadMeses().then(() => { loadProjecao(); atualizarTopo(); }); });
+
+// ---------- primeira inicialização (assistente) ----------
+// passos: chave da AUVP e primeira sincronização → contas e cartões → rendas → só este PC ou casa toda
+const assist = {
+  el: () => document.getElementById('assistente'),
+  ir(n) {
+    const el = this.el();
+    el.querySelectorAll('section[data-passo]').forEach(s => { s.hidden = +s.dataset.passo !== n; });
+    el.querySelectorAll('.assist-passos li').forEach((li, i) => { li.className = i < n ? 'feito' : i === n ? 'atual' : ''; });
+    el.querySelector('.assist-caixa').scrollTop = 0;
+    this.passo = n;
+    if (n === 1) assistContas();
+    if (n === 2) renderRendasConfig(document.getElementById('as-rendas'));
+    if (n === 3) assistModo();
+  }
+};
+
+async function abrirAssistente() {
+  const est = await api('/api/setup/estado').catch(() => null);
+  if (!est || est.concluido) return false;
+  const el = assist.el();
+  el.hidden = false;
+  document.body.classList.add('sem-rolagem');
+  el.querySelectorAll('[data-voltar]').forEach(b => { b.onclick = () => assist.ir(assist.passo - 1); });
+  if (est.tem_chave) document.getElementById('as-chave').placeholder = '•••••••• (já salva — pode só clicar em conectar)';
+  document.getElementById('as-conectar').onclick = assistConectar;
+  document.getElementById('as-contas-ok').onclick = assistSalvarContas;
+  document.getElementById('as-rendas-ok').onclick = () => assist.ir(3);
+  document.getElementById('as-concluir').onclick = assistConcluir;
+  assist.ir(0);
+  return true;
+}
+
+async function assistConectar() {
+  const chave = document.getElementById('as-chave').value.trim();
+  const out = document.getElementById('as-sync');
+  const botao = document.getElementById('as-conectar');
+  const est = await api('/api/setup/estado');
+  if (!chave && !est.tem_chave) { out.innerHTML = '<p class="assist-erro">Cole a chave do MCP da AUVP.</p>'; return; }
+  botao.disabled = true;
+  out.innerHTML = `<p class="muted">${ico('loading', 'gira')} Buscando suas contas, cartões e transações na AUVP… (pode levar um minuto)</p>`;
+  try {
+    await jsonPost('/api/config/auvp', { key: chave || undefined, ativo: true });
+    const r = await api('/api/auvp/sync', { method: 'POST' });
+    const n = r.nucleo || {};
+    if (n.erro) throw new Error(n.erro);
+    const contas = await api('/api/contas?todas=1');
+    out.innerHTML = `<p class="assist-ok">${ico('check')} Conectado. Encontrei ${contas.filter(c => c.tipo === 'BANK').length} conta(s), ${contas.filter(c => c.tipo === 'CREDIT').length} cartão(ões) e ${n.transacoes_novas ?? 0} transação(ões).</p>`;
+    atualizarTopo();
+    setTimeout(() => assist.ir(1), 900);
+  } catch (err) {
+    const recusada = /401|Unauthorized|Credencial/i.test(err.message);
+    out.innerHTML = `<p class="assist-erro">${recusada ? 'A AUVP recusou essa chave.' : 'Não deu certo: ' + esc(err.message)}</p><p class="muted assist-nota">Confira se a chave foi copiada inteira e se a sua conta da AUVP está ativa.</p>`;
+  } finally { botao.disabled = false; }
+}
+
+async function assistContas() {
+  const contas = await api('/api/contas?todas=1').catch(() => []);
+  const el = document.getElementById('as-contas');
+  if (!contas.length) { el.innerHTML = '<p class="muted">Nenhuma conta chegou da AUVP. Conecte seus bancos lá e sincronize de novo em Configurar.</p>'; return; }
+  el.innerHTML = contas.map(c => `
+    <div class="assist-conta" data-id="${esc(c.id)}">
+      <span class="assist-conta-nome">${esc(c.icone || '')} <b>${esc(c.nome)}</b> <span class="muted">${c.tipo === 'CREDIT' ? 'cartão' : 'conta'}</span></span>
+      ${c.tipo === 'CREDIT' ? `
+        <label>Fecha dia <input type="number" min="1" max="31" data-f="dia_fechamento" value="${c.dia_fechamento ?? c.fecha_aprendido ?? ''}"></label>
+        <label>Vence dia <input type="number" min="1" max="31" data-f="dia_vencimento" value="${c.dia_vencimento ?? c.vence_aprendido ?? ''}"></label>` : ''}
+    </div>`).join('');
+}
+
+async function assistSalvarContas() {
+  const faltando = [];
+  for (const linha of document.querySelectorAll('#as-contas .assist-conta')) {
+    const ins = linha.querySelectorAll('input');
+    if (!ins.length) continue;
+    const [f, v] = [...ins].map(i => parseInt(i.value));
+    if (!(f >= 1 && f <= 31 && v >= 1 && v <= 31)) { faltando.push(linha.querySelector('b').textContent); continue; }
+    await jsonPost('/api/contas/' + encodeURIComponent(linha.dataset.id), { dia_fechamento: f, dia_vencimento: v }, 'PUT');
+  }
+  if (faltando.length) return toast('Preencha fechamento e vencimento de: ' + faltando.join(', '));
+  assist.ir(2);
+}
+
+async function assistModo() {
+  const info = await api('/api/acesso/info').catch(() => ({}));
+  const marcar = m => document.querySelectorAll('.assist-opcao').forEach(b => b.classList.toggle('sel', b.dataset.modo === m));
+  marcar(info.modo);
+  mostrarEnderecos(document.getElementById('as-modo'), info);
+  document.querySelectorAll('.assist-opcao').forEach(b => {
+    b.onclick = async () => {
+      if (info.fixo) return toast('O endereço foi fixado na instalação (Docker): mude por lá');
+      marcar(b.dataset.modo);
+      const r = await jsonPost('/api/acesso/modo', { modo: b.dataset.modo }).catch(err => { toast(err.message); return null; });
+      if (r) mostrarEnderecos(document.getElementById('as-modo'), r);
+    };
+  });
+}
+
+// endereço para abrir no celular, quando o app está aberto para a casa toda
+function mostrarEnderecos(el, info) {
+  if (!el) return;
+  if (info.modo !== 'casa') { el.innerHTML = ''; return; }
+  el.innerHTML = info.enderecos && info.enderecos.length
+    ? `<p>No celular ou em outro computador da casa, conectado ao mesmo Wi-Fi, abra:</p>
+       ${info.enderecos.map(u => `<div class="assist-endereco mono">${esc(u)}</div>`).join('')}
+       <p class="muted assist-nota">No Windows, se aparecer o aviso do firewall pedindo para liberar o Node.js, marque <b>Redes privadas</b> e permita. Se o endereço mudar depois de reiniciar o roteador, ele aparece de novo em Configurar.</p>`
+    : info.fixo
+      ? `<p class="muted">Abra pelo IP do computador onde o Docker roda, na porta publicada (ex.: http://192.168.0.10:4321). Para mostrar o endereço aqui, defina FINANCA_ENDERECO no .env.</p>`
+      : '<p class="muted">Não achei este computador em nenhuma rede. Conecte-o ao Wi-Fi ou ao cabo de casa e veja o endereço em Configurar.</p>';
+}
+
+async function assistConcluir() {
+  await jsonPost('/api/setup/concluir', {});
+  assist.el().hidden = true;
+  document.body.classList.remove('sem-rolagem');
+  toast('Pronto! Seu painel está montado');
+  await loadMeses();
+  loadProjecao();
+  atualizarTopo();
+}
+
+// Configurar → Acesso: onde o app abre, endereço para o celular, senha e sair
+async function renderAcessoConfig() {
+  const info = await api('/api/acesso/info').catch(() => null);
+  if (!info) return;
+  document.getElementById('cfg-acesso').innerHTML = `<p class="muted" style="font-size:13px;">Entrou como <b>${esc(info.usuario)}</b>.${info.fixo ? ' O endereço foi fixado na instalação (Docker).' : ''}</p>`;
+  const marcar = m => document.querySelectorAll('[data-modo-cfg]').forEach(b => b.classList.toggle('sel', b.dataset.modoCfg === m));
+  marcar(info.modo);
+  mostrarEnderecos(document.getElementById('cfg-acesso-enderecos'), info);
+  document.querySelectorAll('[data-modo-cfg]').forEach(b => {
+    b.onclick = async () => {
+      if (info.fixo) return toast('O endereço foi fixado na instalação (Docker): mude por lá');
+      if (b.dataset.modoCfg === 'pc' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+        && !confirm('Você está em outro aparelho. Depois disso o app só abre no computador onde ele roda. Continuar?')) return;
+      const r = await jsonPost('/api/acesso/modo', { modo: b.dataset.modoCfg }).catch(err => { toast(err.message); return null; });
+      if (r) { marcar(r.modo); mostrarEnderecos(document.getElementById('cfg-acesso-enderecos'), r); toast(r.modo === 'casa' ? 'Aberto para a casa toda' : 'Só neste computador'); }
+    };
+  });
+  document.getElementById('cfg-trocar-senha').onclick = async () => {
+    const atual = prompt('Senha atual:'); if (!atual) return;
+    const nova = prompt('Nova senha (pelo menos 6 caracteres):'); if (!nova) return;
+    if (prompt('Repita a nova senha:') !== nova) return toast('As senhas não são iguais');
+    try { await jsonPost('/api/acesso/senha', { atual, nova }); toast('Senha trocada'); } catch (err) { toast(err.message); }
+  };
+  document.getElementById('cfg-sair').onclick = async () => { await jsonPost('/api/acesso/sair', {}); location.href = '/entrar.html'; };
+}

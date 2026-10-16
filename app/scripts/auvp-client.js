@@ -11,7 +11,7 @@ function cfgAUVP() {
   const antiga = get('auvp_key');
   if (antiga) { segredo.gravarChave(antiga); db.prepare("DELETE FROM config WHERE chave='auvp_key'").run(); }
   return {
-    url: process.env.AUVP_URL || get('auvp_url'),
+    url: process.env.AUVP_URL || get('auvp_url') || 'https://financas-api.auvp.com.br/mcp', // endereço público do MCP da AUVP
     key: process.env.AUVP_KEY || segredo.lerChave(),
     ativo: process.env.AUVP_ATIVO ? process.env.AUVP_ATIVO === '1' : get('auvp_ativo') === '1'
   };

@@ -9,10 +9,13 @@ function listarContas(apenasAtivas = false) {
   return rows.map(r => {
     let fontes = [];
     try { fontes = JSON.parse(r.fontes || '[]'); } catch (e) { fontes = r.fontes ? [r.fontes] : []; }
+    const cartao = db.prepare('SELECT perfil_conferido, fecha_dia, vence_dia FROM cartoes WHERE conta_local = ?').get(r.id) || {};
     return {
       ...r,
       fontes,
-      perfil: (db.prepare('SELECT perfil_conferido FROM cartoes WHERE conta_local = ?').get(r.id) || {}).perfil_conferido === 0 ? 'aprendido' : 'conferido',
+      perfil: cartao.perfil_conferido === 0 ? 'aprendido' : 'conferido',
+      // o que a sincronização aprendeu das faturas (o assistente mostra para a pessoa conferir)
+      fecha_aprendido: cartao.fecha_dia ?? null, vence_aprendido: cartao.vence_dia ?? null,
       configurado: r.tipo === 'BANK' || (r.dia_fechamento != null && r.dia_vencimento != null)
     };
   });

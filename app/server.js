@@ -5,6 +5,84 @@ require('./scripts/regras-seed').seedRegras(); // banco novo: regras genéricas 
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+// ---------- acesso: conta única, sessão e onde o app escuta (core/acesso.js) ----------
+const acesso = require('./core/acesso');
+app.use(acesso.exigirSessao);
+
+app.get('/api/acesso/estado', (req, res) => {
+  res.json({ tem_conta: acesso.temConta(), precisa_codigo: !acesso.temConta() && !acesso.deste_pc(req) });
+});
+app.post('/api/acesso/criar', (req, res) => {
+  if (acesso.temConta()) return res.status(409).json({ erro: 'este app já tem conta: entre com ela' });
+  const { usuario, senha, codigo } = req.body || {};
+  const ip = req.socket.remoteAddress;
+  if (acesso.bloqueado(ip)) return res.status(429).json({ erro: 'muitas tentativas: espere 1 minuto' });
+  if (!acesso.deste_pc(req) && String(codigo || '').trim() !== acesso.codigo()) {
+    acesso.errou(ip);
+    return res.status(403).json({ erro: 'código de instalação errado (ele aparece no terminal onde o app foi iniciado)' });
+  }
+  const erro = acesso.validar(usuario, senha);
+  if (erro) return res.status(400).json({ erro });
+  acesso.criarConta(usuario, senha);
+  res.setHeader('Set-Cookie', acesso.cookieSessao(acesso.novaSessao()));
+  res.json({ ok: true });
+});
+app.post('/api/acesso/entrar', (req, res) => {
+  const ip = req.socket.remoteAddress;
+  if (acesso.bloqueado(ip)) return res.status(429).json({ erro: 'muitas tentativas: espere 1 minuto' });
+  const { usuario, senha } = req.body || {};
+  const ok = acesso.temConta() && String(usuario || '').trim().toLowerCase() === String(acesso.usuario()).toLowerCase()
+    && acesso.confere(senha, acesso.senhaGuardada());
+  if (!ok) { acesso.errou(ip); return res.status(401).json({ erro: 'usuário ou senha errados' }); }
+  acesso.limparErros(ip);
+  res.setHeader('Set-Cookie', acesso.cookieSessao(acesso.novaSessao()));
+  res.json({ ok: true });
+});
+app.post('/api/acesso/sair', (req, res) => {
+  acesso.encerrarSessao(req);
+  res.setHeader('Set-Cookie', acesso.cookieSair());
+  res.json({ ok: true });
+});
+app.post('/api/acesso/senha', (req, res) => {
+  const { atual, nova } = req.body || {};
+  if (!acesso.confere(atual, acesso.senhaGuardada())) return res.status(400).json({ erro: 'a senha atual não confere' });
+  const erro = acesso.validar(acesso.usuario(), nova);
+  if (erro) return res.status(400).json({ erro });
+  acesso.trocarSenha(nova);
+  res.setHeader('Set-Cookie', acesso.cookieSessao(acesso.novaSessao()));
+  res.json({ ok: true });
+});
+const infoAcesso = () => ({
+  usuario: acesso.usuario(), modo: acesso.modo(), fixo: !!acesso.hostFixo(), porta: PORT,
+  enderecos: acesso.enderecosRede().map(e => (/^https?:\/\//.test(e) ? e : `http://${e}:${PORT}`))
+});
+app.get('/api/acesso/info', (req, res) => res.json(infoAcesso()));
+app.post('/api/acesso/modo', (req, res) => {
+  if (acesso.hostFixo()) return res.status(400).json({ erro: 'o endereço foi fixado por FINANCA_HOST (Docker): mude lá' });
+  const { modo } = req.body || {};
+  if (!['pc', 'casa'].includes(modo)) return res.status(400).json({ erro: 'modo é pc ou casa' });
+  const mudou = modo !== acesso.modo();
+  acesso.definirModo(modo);
+  res.json({ ok: true, ...infoAcesso() });
+  if (mudou) setTimeout(escutar, 300); // responde antes de trocar a porta de lugar
+});
+
+// ---------- primeira inicialização ----------
+app.get('/api/setup/estado', (req, res) => {
+  const auvp = require('./scripts/auvp-client').cfgAUVP();
+  res.json({
+    concluido: acesso.setupOk(), tem_chave: !!auvp.key,
+    contas: db.prepare('SELECT COUNT(*) n FROM contas_bancarias').get().n,
+    transacoes: db.prepare('SELECT COUNT(*) n FROM transacoes').get().n,
+    rendas: db.prepare('SELECT COUNT(*) n FROM rendas WHERE ativo=1').get().n
+  });
+});
+app.post('/api/setup/concluir', (req, res) => {
+  getOrCreateMes(MES_ATUAL()); // banco novo: o mês corrente passa a existir para as telas
+  acesso.concluirSetup();
+  res.json({ ok: true });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- helpers ----------
@@ -1010,7 +1088,24 @@ app.get('/api/extratos/fontes', (req, res) => {
 });
 
 
-const PORT = process.env.PORT || 4321;
-app.listen(PORT, () => console.log(`Finanças app rodando em http://localhost:${PORT}`));
+const PORT = Number(process.env.PORT) || 4321;
+// escuta só neste PC (127.0.0.1) ou na rede de casa (0.0.0.0), conforme o modo escolhido; troca sem reiniciar
+let servidor = null;
+function escutar() {
+  const subir = () => {
+    const host = acesso.host();
+    servidor = app.listen(PORT, host, () => {
+      console.log(`Leftover Finance rodando em http://localhost:${PORT}`);
+      if (acesso.modo() === 'casa') for (const e of infoAcesso().enderecos) console.log(`  na rede de casa: ${e}`);
+      const codigo = acesso.codigo();
+      if (codigo) console.log(`  primeira vez: crie sua conta no navegador. De outro aparelho, use o código de instalação ${codigo}`);
+    });
+  };
+  const antigo = servidor;
+  if (!antigo) return subir();
+  antigo.close(subir);
+  antigo.closeAllConnections(); // conexões abertas segurariam a porta
+}
+escutar();
 
 require('./scripts/sync-diario').iniciarSyncDiario();

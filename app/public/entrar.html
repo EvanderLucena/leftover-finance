@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entrar — Leftover Finance</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="tela-entrar">
+<main class="entrar-caixa">
+  <div class="entrar-logo"><img src="/logo.svg" alt="" class="logo-mark"> LEFTOVER<b>FINANCE</b></div>
+
+  <form id="f-criar" hidden>
+    <h2>Bem-vindo</h2>
+    <p class="muted">Primeiro, crie o acesso deste app. Ele vale para quem for abrir o app aqui ou em outro aparelho da casa. É uma conta só, guardada neste computador.</p>
+    <label>Usuário <input name="usuario" autocomplete="username" required></label>
+    <label>Senha <input name="senha" type="password" autocomplete="new-password" minlength="6" required></label>
+    <label>Repita a senha <input name="senha2" type="password" autocomplete="new-password" minlength="6" required></label>
+    <label id="campo-codigo" hidden>Código de instalação
+      <input name="codigo" inputmode="numeric" autocomplete="one-time-code">
+      <small class="muted">Você está abrindo de outro aparelho: o código aparece no terminal (ou no <code>docker compose logs</code>) do computador onde o app roda.</small>
+    </label>
+    <button class="cta" type="submit">Criar acesso</button>
+    <p class="entrar-erro" role="alert"></p>
+  </form>
+
+  <form id="f-entrar" hidden>
+    <h2>Entrar</h2>
+    <label>Usuário <input name="usuario" autocomplete="username" required></label>
+    <label>Senha <input name="senha" type="password" autocomplete="current-password" required></label>
+    <button class="cta" type="submit">Entrar</button>
+    <p class="entrar-erro" role="alert"></p>
+    <p class="muted entrar-dica">Esqueceu a senha? No computador onde o app roda, rode <code>npm run nova-senha</code> na pasta <code>app</code>.</p>
+  </form>
+</main>
+<script src="/entrar.js"></script>
+</body>
+</html>

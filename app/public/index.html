@@ -524,6 +524,19 @@
           <div class="muted" id="cfg-auvp-ultimo" style="font-size:12px; margin-top:10px;"></div>
           <div id="auvp-sync-result" style="margin-top:14px;"></div>
         </div>
+        <div class="panel">
+          <h4>ACESSO</h4>
+          <div id="cfg-acesso"></div>
+          <div class="assist-opcoes" style="margin-top:12px;">
+            <button class="assist-opcao" data-modo-cfg="pc"><b>Só neste computador</b><span class="muted">Ninguém da rede acessa.</span></button>
+            <button class="assist-opcao" data-modo-cfg="casa"><b>Na casa toda</b><span class="muted">Celular e outros aparelhos do mesmo Wi-Fi, com usuário e senha.</span></button>
+          </div>
+          <div id="cfg-acesso-enderecos" class="assist-resultado"></div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+            <button class="ghost" id="cfg-trocar-senha">Trocar senha</button>
+            <button class="ghost" id="cfg-sair">Sair</button>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -583,6 +596,75 @@
   </div>
 </div>
 
+<!-- primeira inicialização: aparece até a pessoa concluir (app.js → abrirAssistente) -->
+<div id="assistente" class="assist" hidden>
+  <div class="assist-caixa">
+    <ol class="assist-passos"><li>AUVP</li><li>Contas</li><li>Rendas</li><li>Onde usar</li></ol>
+
+    <section data-passo="0">
+      <h2>Vamos montar o seu painel</h2>
+      <p>O Leftover Finance mostra quanto do seu dinheiro já está comprometido (faturas, parcelas, contas fixas) e quanto sobra de verdade, mês a mês.</p>
+      <p>Ele não pede senha de banco. Os dados chegam pela <b>AUVP</b>: você conecta seus bancos e cartões lá, pelo open finance, e este app lê esses dados pelo <b>MCP da AUVP</b>. A leitura é só de consulta: daqui não sai nenhum pagamento nem transferência.</p>
+      <ol class="assist-lista">
+        <li>Na sua conta da AUVP, confira se os bancos e cartões que você usa estão conectados.</li>
+        <li>Gere a chave de acesso do MCP (ela começa com <code>auvp_</code>) e cole aqui embaixo.</li>
+      </ol>
+      <label class="assist-campo">Chave do MCP da AUVP
+        <input id="as-chave" type="password" autocomplete="off" placeholder="auvp_...">
+      </label>
+      <p class="muted assist-nota">A chave fica no cofre do sistema deste computador (no Windows, protegida pela sua conta de usuário). Ela não vai para o banco de dados do app.</p>
+      <div class="assist-acoes">
+        <button class="cta" id="as-conectar">Conectar e buscar meus dados</button>
+      </div>
+      <div id="as-sync" class="assist-resultado"></div>
+    </section>
+
+    <section data-passo="1" hidden>
+      <h2>Suas contas e cartões</h2>
+      <p>Estas chegaram da AUVP. Nos cartões, o dia de fechamento e o de vencimento foram calculados pelas faturas que já vieram e podem errar por um ou dois dias. Confira no app do banco e corrija aqui: é com eles que o app sabe em qual fatura cai cada compra.</p>
+      <div id="as-contas"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-contas-ok">Está certo, continuar</button>
+      </div>
+    </section>
+
+    <section data-passo="2" hidden>
+      <h2>Suas rendas</h2>
+      <p>Renda é o que entra todo mês e paga as contas: salário, pró-labore, aluguel recebido. Separei as entradas que se repetem no seu histórico; diga quais são renda e de que tipo:</p>
+      <ul class="assist-lista muted">
+        <li><b>Fixa</b>: o mesmo valor todo mês.</li>
+        <li><b>Por hora</b>: valor da hora × horas do mês.</li>
+        <li><b>Variável</b>: muda todo mês; o app usa a média dos últimos 3 meses.</li>
+        <li><b>Eventual</b>: só conta no mês em que cair.</li>
+      </ul>
+      <div id="as-rendas"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-rendas-ok">Continuar</button>
+      </div>
+    </section>
+
+    <section data-passo="3" hidden>
+      <h2>Onde você vai usar?</h2>
+      <div class="assist-opcoes">
+        <button class="assist-opcao" data-modo="pc">
+          <b>Só neste computador</b>
+          <span class="muted">O app abre só aqui. Ninguém da rede consegue acessar.</span>
+        </button>
+        <button class="assist-opcao" data-modo="casa">
+          <b>Na casa toda</b>
+          <span class="muted">Abre também no celular e em outros computadores conectados ao mesmo Wi-Fi, com o seu usuário e senha. Este computador precisa estar ligado e com o app aberto.</span>
+        </button>
+      </div>
+      <div id="as-modo" class="assist-resultado"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-concluir">Concluir</button>
+      </div>
+    </section>
+  </div>
+</div>
 <div id="toast"></div>
 <script src="/chart.umd.js"></script>
 <script src="/app.js"></script>

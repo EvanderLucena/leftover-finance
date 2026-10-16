@@ -26,6 +26,8 @@ function casaRenda(r) {
       : (re ? re.test(t.descricao) || re.test(chaveCredito(t.descricao)) : false));
 }
 
+// créditos que não são de um pagador: dinheiro seu indo e voltando, estorno, rendimento
+const GENERICO = /CONTAS? PROPRIAS?|MESMA TITULARIDADE|RESGATE|APLIC|RENDIMENTO|ESTORNO|DEVOLUCAO|CASHBACK|PAGAMENTO (DA )?FATURA/;
 // nome legível de uma sugestão: sem o CPF e sem os pedaços com número (data, agência)
 const nomeDe = d => String(d).replace(/\s*·\s*(CPF|CNPJ).*$/i, '').replace(/\d[\d.\/-]*/g, ' ')
   .split(/\s+/).map(w => w.replace(/^[.\/-]+|[.\/-]+$/g, '')).filter(Boolean).join(' ').replace(/\s\S$/, '').trim() || String(d);
@@ -82,7 +84,7 @@ function sugestoes(hoje = cal.hojeISO(), meses = 6) {
   const grupos = new Map();
   for (const t of livres) {
     const k = chaveCredito(t.descricao);
-    if (!k) continue;
+    if (!k || GENERICO.test(k)) continue; // texto que não diz quem pagou: só entra pelo valor exato (passo 2)
     if (!grupos.has(k)) grupos.set(k, []);
     grupos.get(k).push(t);
   }
@@ -104,7 +106,7 @@ function sugestoes(hoje = cal.hojeISO(), meses = 6) {
   }
   for (const [k, ts] of porValor) {
     if (new Set(ts.map(t => t.data.slice(0, 7))).size < 2) continue;
-    out.push(resumir('valor:' + k, ts, { nome: 'Entrada de ' + k.replace('.', ','), padrao_regex: null, valor_exato: +k }));
+    out.push(resumir('valor:' + k, ts, { nome: `${nomeDe(ts[ts.length - 1].descricao)} de ${k.replace('.', ',')}`,padrao_regex: null, valor_exato: +k }));
   }
   // só o que ainda está ativo (caiu nos últimos 2 meses), da maior para a menor
   const corte = cal.addMes(ym, -2) + '-01';

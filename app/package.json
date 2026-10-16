@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "nova-senha": "node scripts/nova-senha.js"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
