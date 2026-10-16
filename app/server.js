@@ -415,6 +415,21 @@ app.delete('/api/recorrentes/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// contas fixas sugeridas pelo histórico (core/contas-fixas.js): aceitar cria a recorrência e a conta deste mês
+const contasFixas = require('./core/contas-fixas');
+app.get('/api/contas-fixas/sugestoes', (req, res) => {
+  res.json(contasFixas.sugestoes());
+});
+app.post('/api/contas-fixas', (req, res) => {
+  try { res.json(contasFixas.aceitar(req.body || {}, MES_ATUAL(), getOrCreateMes)); }
+  catch (e) { res.status(400).json({ erro: e.message }); }
+});
+app.post('/api/contas-fixas/dispensar', (req, res) => {
+  if (!req.body || !req.body.chave) return res.status(400).json({ erro: 'chave obrigatória' });
+  contasFixas.dispensar(req.body.chave);
+  res.json({ ok: true });
+});
+
 // ---------- API: categorias ----------
 app.get('/api/categorias', (req, res) => {
   res.json(db.prepare('SELECT nome FROM categorias ORDER BY nome').all());

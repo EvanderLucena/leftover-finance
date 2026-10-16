@@ -394,6 +394,10 @@
         <span class="muted" id="rec-resumo" style="font-size:12.5px;"></span>
         <span class="muted" id="rec-gerar-status" style="font-size:12.5px;"></span>
       </div>
+      <div class="panel" hidden>
+        <h4>CONTAS FIXAS ENCONTRADAS NO SEU HISTÓRICO</h4>
+        <div id="rec-sugestoes"></div>
+      </div>
       <div class="panel">
         <table id="tbl-rec">
           <thead>
@@ -599,7 +603,7 @@
 <!-- primeira inicialização: aparece até a pessoa concluir (app.js → abrirAssistente) -->
 <div id="assistente" class="assist" hidden>
   <div class="assist-caixa">
-    <ol class="assist-passos"><li>AUVP</li><li>Contas</li><li>Rendas</li><li>Onde usar</li></ol>
+    <ol class="assist-passos"><li>AUVP</li><li>Bancos</li><li>Rendas</li><li>Contas fixas</li><li>Onde usar</li></ol>
 
     <section data-passo="0">
       <h2>Vamos montar o seu painel</h2>
@@ -646,6 +650,25 @@
     </section>
 
     <section data-passo="3" hidden>
+      <h2>Contas fixas e dívidas</h2>
+      <p>O app divide o seu mês em três partes:</p>
+      <ul class="assist-lista">
+        <li><b>Faturas de cartão</b>: vêm sozinhas da AUVP. Compra no cartão não se cadastra aqui.</li>
+        <li><b>Contas fixas e dívidas</b>: aluguel, condomínio, luz, internet, escola, financiamento, empréstimo. Você cadastra <b>uma vez</b>.</li>
+        <li><b>Dia a dia</b>: todo o resto que sai da conta (PIX, débito).</li>
+      </ul>
+      <div class="assist-aviso">
+        <b>Como funciona:</b> cada conta fixa vira uma <b>recorrente</b>. Quando o mês acabar, em <b>Recorrentes → Gerar próximo mês</b>, o app cria as contas do mês seguinte a partir delas; a dívida parcelada para sozinha na última parcela.
+        <br><br><b>Neste mês</b>, cadastre tudo o que é fixo ou dívida: o que você já pagou e o que ainda vai pagar. O que já foi pago é ligado ao pagamento automaticamente e sai do "dia a dia"; o que falta pagar entra no comprometido do mês.
+      </div>
+      <div id="as-fixas"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-fixas-ok">Continuar</button>
+      </div>
+    </section>
+
+    <section data-passo="4" hidden>
       <h2>Onde você vai usar?</h2>
       <div class="assist-opcoes">
         <button class="assist-opcao" data-modo="pc">

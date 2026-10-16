@@ -655,3 +655,12 @@ body.sem-rolagem { overflow: hidden; }
   .assist-opcoes { grid-template-columns: 1fr; }
   .assist-passos li { font-size: 11px; }
 }
+
+/* contas fixas sugeridas */
+.assist-aviso { background: rgba(77, 171, 255, .08); border: 1px solid rgba(77, 171, 255, .3); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; margin: 4px 0 14px; }
+.assist-cadastradas { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.assist-cadastradas b { color: var(--txt); }
+.fixa-nome { width: 100%; padding: 2px 6px; margin-left: -6px; font-size: 14.5px; }
+.fixa-parc { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.fixa-parc[hidden] { display: none; }
+.fixa-parc input { width: 58px; background: var(--bg); color: var(--txt); border: 1px solid var(--line); border-radius: 7px; padding: 6px 6px; font-size: 13px; }

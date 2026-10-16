@@ -1778,6 +1778,7 @@ if (_recStatus) _recStatus.onchange = renderTabelaRecorrentes;
 async function loadRecorrentes() {
   _recRows = await api('/api/recorrentes');
   renderTabelaRecorrentes();
+  renderFixasRecorrentes();
 
   // status do próximo mês: o que será gerado
   const st = document.getElementById('rec-gerar-status');
@@ -2816,7 +2817,8 @@ const assist = {
     this.passo = n;
     if (n === 1) assistContas();
     if (n === 2) renderRendasConfig(document.getElementById('as-rendas'));
-    if (n === 3) assistModo();
+    if (n === 3) assistFixas();
+    if (n === 4) assistModo();
   }
 };
 
@@ -2831,6 +2833,7 @@ async function abrirAssistente() {
   document.getElementById('as-conectar').onclick = assistConectar;
   document.getElementById('as-contas-ok').onclick = assistSalvarContas;
   document.getElementById('as-rendas-ok').onclick = assistRendasOk;
+  document.getElementById('as-fixas-ok').onclick = assistFixasOk;
   document.getElementById('as-concluir').onclick = assistConcluir;
   assist.ir(0);
   return true;
@@ -2961,4 +2964,96 @@ async function assistRendasOk() {
   const rendas = await api('/api/rendas').catch(() => []);
   if (!rendas.length && !confirm('Nenhuma renda cadastrada. Sem renda o app não calcula quanto sobra. Continuar mesmo assim? (dá para cadastrar depois em Configurar)')) return;
   assist.ir(3);
+}
+
+// ---------- contas fixas e dívidas (assistente e aba Recorrentes) ----------
+// pagamentos da conta que se repetem: "é conta fixa?" — aceitar cria a recorrência e a conta deste mês
+async function renderSugestoesFixas(el, aoMudar) {
+  if (!el) return [];
+  const sug = await api('/api/contas-fixas/sugestoes').catch(() => []);
+  if (!sug.length) { el.innerHTML = '<p class="muted" style="font-size:13px;">Nenhum pagamento repetido sem resposta no seu histórico.</p>'; return sug; }
+  el.innerHTML = `<h5 class="sug-titulo">Pagamentos que se repetem todo mês — são contas fixas ou dívidas? Responda cada uma: só entra o que você confirmar.</h5>`
+    + sug.map((s, i) => `
+    <div class="renda-sug fixa-sug" data-i="${i}">
+      <div style="flex:1 1 260px; min-width:0;">
+        <input class="renda-nome fixa-nome" value="${esc(s.nome)}" title="Nome da conta (pode mudar)">
+        <div class="muted" style="font-size:12.5px;">${s.meses} meses · ${s.valor_min === s.valor_max ? fmt(s.valor) : `de ${fmt(s.valor_min)} a ${fmt(s.valor_max)}`} · por volta do dia ${s.dia_tipico}${s.pago_este_mes ? ' · já paga este mês' : ''}</div>
+      </div>
+      <div class="renda-sug-acoes">
+        <select class="fselect fixa-tipo">
+          <option value="Recorrente">Conta fixa (todo mês)</option>
+          <option value="Parcelado">Dívida parcelada</option>
+        </select>
+        <span class="fixa-parc" hidden><input type="number" min="1" class="fixa-atual" placeholder="parc." title="Parcela deste mês"> de <input type="number" min="1" class="fixa-total" placeholder="total" title="Total de parcelas"></span>
+        <button class="ghost sug-sim">Sim, é fixa</button>
+        <button class="ghost sug-nao">Não é</button>
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('.fixa-sug').forEach(card => {
+    const s = sug[+card.dataset.i];
+    const tipo = card.querySelector('.fixa-tipo');
+    tipo.onchange = () => { card.querySelector('.fixa-parc').hidden = tipo.value !== 'Parcelado'; };
+    card.querySelector('.sug-sim').onclick = async () => {
+      const body = {
+        descricao: card.querySelector('.fixa-nome').value.trim() || s.nome, valor: s.valor, dia_venc: s.dia_tipico,
+        categoria: s.categoria, padrao_busca: s.padrao_busca, tipo: tipo.value,
+        parcela_atual: card.querySelector('.fixa-atual').value, total_parcelas: card.querySelector('.fixa-total').value
+      };
+      try {
+        const r = await jsonPost('/api/contas-fixas', body);
+        toast(`Conta fixa cadastrada: ${body.descricao}${r.conciliados ? ' (pagamento deste mês já ligado)' : ''}`);
+        aoMudar && aoMudar();
+      } catch (err) { toast(err.message); throw err; }
+    };
+    card.querySelector('.sug-nao').onclick = async () => {
+      await jsonPost('/api/contas-fixas/dispensar', { chave: s.chave });
+      card.remove();
+      if (!el.querySelector('.fixa-sug')) aoMudar && aoMudar();
+    };
+  });
+  return sug;
+}
+
+// conta fixa ou dívida que não apareceu no histórico (ex.: começou agora, ou paga em dinheiro)
+async function novaContaFixa(aoMudar) {
+  const descricao = prompt('Nome da conta ou dívida (ex.: Escola, Financiamento do carro):');
+  if (!descricao) return;
+  const valor = parseFloat(String(prompt('Valor por mês (ex.: 450,00):') || '').replace(/\./g, '').replace(',', '.'));
+  if (!isFinite(valor) || valor <= 0) return toast('Valor inválido');
+  const dia = parseInt(prompt('Dia do vencimento (1 a 31):') || '');
+  const parc = (prompt('É parcelada? Digite "parcela atual de total" (ex.: 3 de 12) ou deixe em branco se é todo mês:') || '').match(/(\d+)\D+(\d+)/);
+  const body = { descricao, valor, dia_venc: dia || 5, tipo: parc ? 'Parcelado' : 'Recorrente', parcela_atual: parc ? parc[1] : null, total_parcelas: parc ? parc[2] : null };
+  try { await jsonPost('/api/contas-fixas', body); toast('Cadastrada: ' + descricao); aoMudar && aoMudar(); }
+  catch (err) { toast(err.message); }
+}
+
+// passo do assistente: o que já está cadastrado + sugestões
+async function assistFixas() {
+  const el = document.getElementById('as-fixas');
+  const recs = await api('/api/recorrentes').catch(() => []);
+  const ativas = recs.filter(r => r.ativo);
+  el.innerHTML = (ativas.length ? `<div class="assist-cadastradas"><b>Já cadastradas (${ativas.length}):</b> ${ativas.map(r => `${esc(r.descricao)} ${fmt(r.valor || 0)}${r.tipo === 'Parcelado' ? ` (${r.total_parcelas}x)` : ''}`).join(' · ')}</div>` : '')
+    + '<div id="as-fixas-sug"></div>'
+    + `<button class="ghost" id="as-fixa-nova" style="margin-top:8px;">${ico('plus')} Outra conta fixa ou dívida</button>`;
+  document.getElementById('as-fixa-nova').onclick = () => novaContaFixa(assistFixas);
+  await renderSugestoesFixas(document.getElementById('as-fixas-sug'), assistFixas);
+}
+
+// a trava: sugestão sem resposta não passa batida
+async function assistFixasOk() {
+  const pend = [...document.querySelectorAll('#as-fixas .fixa-sug')];
+  if (pend.length) {
+    const nomes = pend.map(c => '• ' + c.querySelector('.fixa-nome').value).join('\n');
+    if (!confirm(`Estes pagamentos ficaram sem resposta:\n${nomes}\n\nOK cadastra todos como conta fixa. Cancelar volta para você responder um a um (o que não for conta, marque "Não é").`)) return;
+    for (const c of pend) { try { await c.querySelector('.sug-sim').onclick(); } catch (e) { return; } }
+  }
+  assist.ir(4);
+}
+
+// aba Recorrentes: as mesmas sugestões, para quem pulou ou para pagamentos novos
+async function renderFixasRecorrentes() {
+  const el = document.getElementById('rec-sugestoes');
+  if (!el) return;
+  const sug = await renderSugestoesFixas(el, () => loadRecorrentes());
+  el.closest('.panel').hidden = !sug.length;
 }
