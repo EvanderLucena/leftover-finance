@@ -979,7 +979,7 @@ app.post('/api/config/auvp', (req, res) => {
   const atual = auvpClient.cfgAUVP();
   const up = (k, v) => db.prepare("INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor").run(k, v);
   if (url) up('auvp_url', url);
-  if (key) require('./core/segredo').gravarChave(key); // nunca no banco
+  if (key) { require('./core/segredo').gravarChave(key); auvpClient.reiniciarSessao(); } // nunca no banco
   if (ativo !== undefined) up('auvp_ativo', ativo ? '1' : '0');
   res.json({ ok: true });
 });

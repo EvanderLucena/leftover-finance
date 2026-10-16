@@ -10,25 +10,7 @@ const { dataBrasilia, hojeISO } = require('./calendario');
 
 // ---------- chamadas de leitura à AUVP ----------
 async function chamarAUVP(tool, args) {
-  const cli = require('../scripts/auvp-client');
-  await cli.garantirSessao();
-  const { url, key } = cli.cfgAUVP();
-  if (!chamarAUVP.sessao) {
-    const r0 = await fetch(url, { method: 'POST', headers: { 'x-api-key': key, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'finflow', version: '2.0' } } }) });
-    chamarAUVP.sessao = r0.headers.get('mcp-session-id');
-    await r0.text();
-  }
-  await new Promise(r => setTimeout(r, 1100)); // limite de 60 chamadas/min
-  const headers = { 'x-api-key': key, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
-  if (chamarAUVP.sessao) headers['mcp-session-id'] = chamarAUVP.sessao;
-  const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: tool, arguments: args } }) });
-  const t = await r.text();
-  const linhas = t.split('\n').filter(l => l.startsWith('data:'));
-  const j = linhas.length ? JSON.parse(linhas[0].slice(5)) : JSON.parse(t);
-  const txt = j.result && j.result.content && j.result.content[0] && j.result.content[0].text;
-  if (!txt) throw new Error(`AUVP ${tool}: resposta vazia`);
-  return JSON.parse(txt);
+  return require('../scripts/auvp-client').chamarFerramenta(tool, args); // uma sessão só, com espera no limite da AUVP
 }
 
 async function baixarTransacoes(de) {

@@ -2843,7 +2843,7 @@ async function assistConectar() {
   const est = await api('/api/setup/estado');
   if (!chave && !est.tem_chave) { out.innerHTML = '<p class="assist-erro">Cole a chave do MCP da AUVP.</p>'; return; }
   botao.disabled = true;
-  out.innerHTML = `<p class="muted">${ico('loading', 'gira')} Buscando suas contas, cartões e transações na AUVP… (pode levar um minuto)</p>`;
+  out.innerHTML = `<p class="muted">${ico('loading', 'gira')} Buscando suas contas, cartões e transações na AUVP… (pode levar alguns minutos; se a AUVP pedir uma pausa, o app espera e continua sozinho)</p>`;
   try {
     await jsonPost('/api/config/auvp', { key: chave || undefined, ativo: true });
     const r = await api('/api/auvp/sync', { method: 'POST' });
