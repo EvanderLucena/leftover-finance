@@ -1130,13 +1130,13 @@ async function loadProjecao() {
     heroEl.innerHTML = `
       <div class="ph-main">
         <span class="lbl">COMPROMETIDO ATÉ HOJE · ${mesCurto(m1.mes).toUpperCase()}</span>
-        <span class="num ${m1.sobra_livre > 0 ? 'up' : 'down'}">${fmt(m1.comprometido)}<small> (${pctComprometidoM1}% da renda)</small></span>
+        <span class="num ${m1.sobra_livre > 0 ? 'up' : 'down'}">${fmt(m1.comprometido)}<small> (${p.renda_projetada > 0 || m1.renda > 0 ? pctComprometidoM1 + '% da renda' : 'nenhuma renda cadastrada'})</small></span>
         <div class="ph-barra"><i style="width:${Math.min(100, Math.max(0, pctComprometidoM1))}%"></i></div>
         <span class="sub muted">
           Faturas: ${fmt(m1.parcelas_cartao || 0)} · Fixos: ${fmt(m1.fixos || 0)} · Parcelados: ${fmt(m1.parcelas_externas || 0)}${m1.dia_a_dia ? ' · Dia a dia já gasto: ' + fmt(m1.dia_a_dia) : ''} · Renda: ${fmt(m1.renda)} · Sobra livre: <b class="${m1.sobra_livre < 0 ? 'down' : 'up'}">${fmt(m1.sobra_livre)}</b>
         </span>
         <div class="ph-trajectory">
-          <span>Só o que já foi gasto ou está agendado: o comprometido até hoje cai de <b>${pctComprometidoM1}%</b> (${mesCurto(m1.mes)}) para <b>${pctComprometidoM12}%</b> (${mesCurto(m12.mes)}) conforme as parcelas terminam. Compras novas entram quando acontecerem.</span>
+          ${!(p.renda_projetada > 0 || m1.renda > 0) ? `<span>Cadastre suas rendas em <b>Configurar → Minhas rendas</b> para ver quanto do que entra já está comprometido e quanto sobra.</span>` : `<span>Só o que já foi gasto ou está agendado: o comprometido até hoje cai de <b>${pctComprometidoM1}%</b> (${mesCurto(m1.mes)}) para <b>${pctComprometidoM12}%</b> (${mesCurto(m12.mes)}) conforme as parcelas terminam. Compras novas entram quando acontecerem.</span>`}
           <span style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;"><button class="ghost" id="proj-btn-auvp">🔄 Atualizar da AUVP</button><button class="ghost" onclick="abrirModalFaturasAbertas()">💳 Conferir faturas com o app</button></span>
         </div>
       </div>
@@ -2500,7 +2500,7 @@ async function renderSugestoesRenda(el, aoMudar) {
   if (!el) return [];
   const sug = await api('/api/rendas/sugestoes').catch(() => []);
   if (!sug.length) { el.innerHTML = ''; return sug; }
-  el.innerHTML = `<h5 class="sug-titulo">Entradas que se repetem no seu histórico — são renda?</h5>`
+  el.innerHTML = `<h5 class="sug-titulo">Entradas que se repetem no seu histórico — são renda? Responda cada uma: só entra o que você confirmar.</h5>`
     + sug.map((s, i) => `
     <div class="renda-sug" data-i="${i}">
       <div>
@@ -2509,7 +2509,7 @@ async function renderSugestoesRenda(el, aoMudar) {
       </div>
       <div class="renda-sug-acoes">
         <select class="fselect sug-tipo">${Object.entries(TIPO_RENDA).map(([k, v]) => `<option value="${k}" ${s.tipo_sugerido === k ? 'selected' : ''}>${v.split(' —')[0]}</option>`).join('')}</select>
-        <button class="cta sug-sim">É renda</button>
+        <button class="ghost sug-sim">Sim, é renda</button>
         <button class="ghost sug-nao">Não é</button>
       </div>
     </div>`).join('');
@@ -2830,7 +2830,7 @@ async function abrirAssistente() {
   if (est.tem_chave) document.getElementById('as-chave').placeholder = '•••••••• (já salva — pode só clicar em conectar)';
   document.getElementById('as-conectar').onclick = assistConectar;
   document.getElementById('as-contas-ok').onclick = assistSalvarContas;
-  document.getElementById('as-rendas-ok').onclick = () => assist.ir(3);
+  document.getElementById('as-rendas-ok').onclick = assistRendasOk;
   document.getElementById('as-concluir').onclick = assistConcluir;
   assist.ir(0);
   return true;
@@ -2947,4 +2947,18 @@ async function renderAcessoConfig() {
     try { await jsonPost('/api/acesso/senha', { atual, nova }); toast('Senha trocada'); } catch (err) { toast(err.message); }
   };
   document.getElementById('cfg-sair').onclick = async () => { await jsonPost('/api/acesso/sair', {}); location.href = '/entrar.html'; };
+}
+
+// rendas: sugestão sem resposta não pode passar batida
+async function assistRendasOk() {
+  const pend = [...document.querySelectorAll('#as-rendas .renda-sug')];
+  if (pend.length) {
+    const nomes = pend.map(c => '• ' + c.querySelector('b').textContent).join('\n');
+    if (!confirm(`Estas entradas ficaram sem resposta:\n${nomes}\n\nOK cadastra todas como renda (com o tipo escolhido em cada uma). Cancelar volta para você responder uma a uma.`)) return;
+    for (const c of pend) await c.querySelector('.sug-sim').onclick();
+    await new Promise(r => setTimeout(r, 300));
+  }
+  const rendas = await api('/api/rendas').catch(() => []);
+  if (!rendas.length && !confirm('Nenhuma renda cadastrada. Sem renda o app não calcula quanto sobra. Continuar mesmo assim? (dá para cadastrar depois em Configurar)')) return;
+  assist.ir(3);
 }
