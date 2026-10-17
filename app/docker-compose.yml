@@ -1,37 +1,20 @@
+# Leftover Finance no Docker: o app com login próprio, aberto na rede de casa (HTTP).
+# Primeira vez: rode `docker compose up -d`, veja o código de instalação com `docker compose logs app`
+# e abra http://IP-DESTE-COMPUTADOR:4321 no navegador para criar usuário e senha.
 services:
   app:
     build: .
     restart: unless-stopped
     environment:
       FINANCA_DB: /data/financas.db
-      PORT: 3000
-      # chave da AUVP: cofre no volume persistente (em Linux é um arquivo só do usuário, permissão 600)
+      PORT: 4321
+      FINANCA_HOST: 0.0.0.0           # dentro do container; quem limita o acesso é a linha "ports" abaixo
+      FINANCA_ENDERECO: ${FINANCA_ENDERECO:-}
+      # chave da AUVP: cofre no volume persistente (arquivo só do usuário, permissão 600)
       FINFLOW_COFRE: /data/cofre
-      AUVP_URL: ${AUVP_URL:-}
       AUVP_KEY: ${AUVP_KEY:-}
-      AUVP_ATIVO: ${AUVP_ATIVO:-}
     volumes:
       - ./data:/data
-    expose:
-      - "3000"
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
-      AUTH_USER: ${AUTH_USER:-admin}
-      AUTH_PASS_HASH: ${AUTH_PASS_HASH:-}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-
-volumes:
-  caddy_data:
-  caddy_config:
+      # casa toda: "4321:4321". Só esta máquina: "127.0.0.1:4321:4321"
+      - "${PORTA:-4321}:4321"

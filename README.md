@@ -5,325 +5,216 @@
 </p>
 
 <p align="center">
-  <strong>Fluxo de caixa pessoal, faturas de cartão, parcelados e contas fixas num só lugar — para saber quanto realmente sobra, hoje e nos próximos meses.</strong>
+  <strong>Sistema inteligente de fluxo de caixa, gestão de despesas fixas, antecipação de faturas de cartão de crédito e projeção de liquidez futura.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/node.js-22.13+-68a063?style=flat-square&logo=node.js&logoColor=white" alt="Node.js 22.13+" />
+  <img src="https://img.shields.io/badge/node.js-v22.13+-68a063?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/database-SQLite%20nativo-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" />
   <img src="https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://img.shields.io/badge/open--finance-AUVP-4dabff?style=flat-square" alt="Open Finance AUVP" />
+  <img src="https://img.shields.io/badge/open--finance-AUVP%20API-4dabff?style=flat-square" alt="Open Finance" />
   <img src="https://img.shields.io/badge/privacy-100%25%20local-success?style=flat-square" alt="Privacy First" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License MIT" />
 </p>
 
 ---
 
-## Sumário
+## 📌 A Filosofia: "Sobra Real" vs "Saldo Ilusório"
 
-- [A ideia: "Sobra Real"](#-a-ideia-sobra-real-vs-saldo-ilusório)
-- [Instalação rápida](#-instalação-rápida)
-- [Primeiros passos (tutorial)](#-primeiros-passos-tutorial)
-- [As telas](#-as-telas)
-- [Instalação com Docker](#-instalação-com-docker)
-- [Configuração (.env)](#️-configuração-env)
-- [Backup, atualização e dados](#-backup-atualização-e-dados)
-- [Problemas comuns](#-problemas-comuns)
-- [Para desenvolvedores](#-para-desenvolvedores)
+A maioria dos aplicativos financeiros tradicionais mostra apenas o seu saldo bancário atual ou um gráfico do que você já gastou no passado. Isso cria uma ilusão de caixa: você tem R$ 5.000 na conta hoje, mas na próxima semana vencem R$ 4.000 em faturas de cartão e contas fixas.
+
+O **Leftover Finance** foca no que realmente importa: **a sua Sobra Real**.
+Ele calcula o fluxo de liquidez projetando o mês atual e meses futuros através de 4 camadas:
+
+```
+Liquidez Disponível = Saldo em Conta + Rendas Previstas
+                     − Faturas de Cartão (correntes e compras parceladas)
+                     − Despesas Fixas da Casa (aluguel, condomínio, luz, etc.)
+                     − Parcelas Contratadas (empréstimos, financiamentos)
+────────────────────────────────────────────────────────────────────────────
+Sobra Real Livre     = O valor que você realmente tem disponível para poupar ou investir.
+```
 
 ---
 
-## 📌 A ideia: "Sobra Real" vs "Saldo Ilusório"
+## 🚀 Funcionalidades Principais
 
-Você tem R$ 5.000 na conta hoje, mas na semana que vem vencem R$ 4.000 de fatura e contas fixas. O saldo bancário engana; o que importa é quanto **sobra** depois de tudo que já está comprometido.
+### 1. 📊 Painel de Controle (Command Center)
+- **Visão Instantânea de Liquidez:** Saldo real de contas correntes, faturas de cartão fechando/vencendo e previsão de saldo pós-faturas.
+- **Card "Para Onde Vai Cada Real":** Distribuição proporcional exata da renda (Faturas de Cartão, Despesas Fixas, Parcelas de Dívidas e Variável) com indicador de pressão orçamentária.
+- **Barra de Progresso Temporal do Mês:** Acompanhe o percentual do mês decorrido vs. ritmo de consumo da renda.
 
-O Leftover Finance calcula, mês a mês:
+### 2. 💳 Inteligência de Faturas & Modelo de Parcelas
+- **Identidade Única de Compras:** Compras parceladas existem uma única vez no sistema; a mesma compra vista em várias faturas é unificada sem duplicar valores.
+- **Relógio de Faturas em Tempo Real:** Acompanhamento dinâmico de datas de corte (fechamento) e vencimento de cada cartão, aprendidos das faturas da AUVP (e ajustáveis em Configurar).
+- **Calendário de Descompressão de Dívidas:** Projeção visual de quando cada parcela contratada termina, permitindo prever a recuperação da renda nos próximos meses.
 
-```
-Comprometido do mês = Faturas de cartão que vencem no mês
-                      (fechada = total oficial; aberta = compras lançadas + parcelas programadas)
-                    + Contas fixas e parcelados que vencem no mês
-                    + (só no mês corrente) PIX/débitos que já saíram e não pagaram nenhuma conta
-─────────────────────────────────────────────────────────────────────────────────
-Sobra livre         = Renda do mês − Comprometido
-```
+### 3. 🏦 Open Finance pela AUVP (qualquer banco)
+- **Sincronização automática:** contas, cartões, saldos, faturas oficiais e transações vêm do MCP da AUVP. Funciona com qualquer banco conectado lá; nenhum banco fica fixo no código.
+- **Contas e cartões descobertos sozinhos:** cada conta ou cartão novo na AUVP aparece em Configurar, com fechamento e vencimento aprendidos das faturas.
+- **Rendas sugeridas pelo histórico:** o app acha as entradas que se repetem e pergunta se são renda; cada uma pode ser fixa, por hora, variável (média dos últimos 3 meses) ou eventual, reconhecida pelo texto ou pelo valor do crédito.
+- **Motor de Regras:** categorização e natureza financeira (`gasto`, `transferencia`, `transferencia-propria`, `salario`, `rendimento`, `ignorado`), com a categoria da AUVP quando nenhuma regra casa.
 
-Sem chute: **não há previsão de gasto variável**. Só entra o que já foi comprado, contratado ou programado.
+### 4. 🧭 Primeira vez guiada e uso na casa toda
+- **Assistente:** cria usuário e senha, pede a chave da AUVP, confere cartões e rendas.
+- **Só este computador ou casa toda:** no segundo caso, abre no celular pelo Wi-Fi, sempre com login.
+
+### 5. 🔒 Privacidade Absoluta & Segurança de Chaves
+- **100% Local:** Todo o armazenamento reside em um banco SQLite (`financas.db`) gerenciado pelo módulo nativo `node:sqlite`.
+- **Zero Vazamento:** Extratos, senhas, planilhas e histórico financeiro são rigorosamente protegidos no `.gitignore`.
+- **Chave da AUVP fora do banco:** fica num cofre local (no Windows, criptografada com DPAPI; no Linux/Docker, arquivo só do dono) ou em variável de ambiente, nunca no `financas.db` nem no git.
 
 ---
 
-## 🚀 Instalação rápida
+## 🏗️ Arquitetura do Sistema
 
-**Pré-requisito:** [Node.js](https://nodejs.org) **22.13 ou mais novo** (recomendado: 24 LTS). O banco usa o `node:sqlite` embutido no Node — não precisa instalar banco de dados.
+```mermaid
+flowchart TD
+    subgraph C1["Frontend (SPA Web)"]
+        UI["Dashboard & Linha do Tempo"]
+        Charts["Visualização Gráfica (Chart.js)"]
+        UI --> Charts
+    end
+
+    subgraph C2["Backend (Node.js & Express)"]
+        API["Servidor REST API (/api)"]
+        Rules["Motor de Heurísticas & Categorização"]
+        Motor["Motor de Comprometimento"]
+        Sync["Sincronização Diária (Open Finance)"]
+
+        API --> Rules
+        API --> Motor
+        API --> Sync
+    end
+
+    subgraph C3["Persistência Local (100% Privado)"]
+        DB[("Banco de Dados SQLite (financas.db)")]
+    end
+
+    subgraph C4["Integrações Externas (Opcionais)"]
+        AUVP["Open Finance (AUVP / MCP)"]
+    end
+
+    UI -->|Requisições HTTP| API
+    Rules --> DB
+    Motor --> DB
+    Sync --> DB
+
+    Sync --> AUVP
+```
+
+---
+
+## 📁 Estrutura do Projeto
+
+```text
+leftover-finance/
+├── .gitignore               # Proteção estrita contra vazamento de dados pessoais
+├── LICENSE                  # Licença MIT
+├── README.md                # Documentação do projeto
+├── iniciar.cmd / iniciar.sh # Instala na primeira vez e sobe o app
+└── app/
+    ├── server.js            # Servidor Express & endpoints da API
+    ├── db.js                # Inicialização e schemas SQLite (node:sqlite)
+    ├── package.json         # Dependências do Node.js
+    ├── Dockerfile           # Imagem conteinerizada de produção
+    ├── docker-compose.yml   # App no Docker, aberto na rede de casa
+    ├── .env.example         # Template de variáveis de ambiente
+    ├── public/              # Frontend web estático
+    │   ├── index.html       # Estrutura SPA (com o assistente da primeira vez)
+    │   ├── entrar.html      # Criar acesso / entrar
+    │   ├── style.css        # Tema e estilos customizados
+    │   ├── app.js           # Lógica do frontend
+    │   ├── chart.umd.js     # Biblioteca gráfica Chart.js
+    │   └── logo.svg         # Identidade visual
+    ├── core/                # Núcleo: sincronização AUVP, faturas, comprometimento, calendário
+    │   ├── acesso.js        # Usuário e senha, sessão e "só este PC" ou "casa toda"
+    │   ├── auvp-sync.js     # Contas, cartões, faturas e transações da AUVP
+    │   ├── comprometido.js  # Motor único: faturas, contas, renda e sobra de cada mês
+    │   ├── fontes.js        # Origem de cada transação (cartão ou conta)
+    │   ├── rendas.js        # Rendas: reconhecimento, sugestões do histórico, média das variáveis
+    │   └── segredo.js       # Cofre local da chave da AUVP
+    └── scripts/             # Módulos de apoio
+        ├── auvp-client.js   # Cliente MCP da AUVP
+        ├── contas.js        # Contas e cartões (descobertos na AUVP)
+        ├── conciliacao.js   # Reconciliar: pagamento × conta do mês
+        ├── motor-regras.js  # Categorização automática
+        ├── regras-seed.js   # Regras iniciais genéricas
+        └── sync-diario.js   # Sincronização em segundo plano
+```
+
+---
+
+## 💻 Instalação & Execução
+
+> **Projeto pessoal, aberto como está.** Use por sua conta; não há suporte. Fork e ajustes são bem-vindos.
+
+Você vai precisar de uma conta na **AUVP** com seus bancos e cartões conectados, e da **chave do MCP da AUVP** (começa com `auvp_`). O app só lê os dados; nada é pago ou transferido por ele.
+
+### Opção 1: No seu computador (Node.js)
+
+Pré-requisito: **Node.js 22.13+** (o app usa o `node:sqlite`, que vem no Node).
 
 ```bash
 git clone https://github.com/EvanderLucena/leftover-finance.git
 cd leftover-finance
+./iniciar.sh        # no Windows: dois cliques em iniciar.cmd
 ```
 
-Depois, **um comando**:
+O `iniciar` confere a versão do Node, instala as dependências na primeira vez, cria o `app/.env` a partir do `.env.example` e sobe o app. Na mão é o mesmo que `cd app && npm install && npm start`.
 
-| Sistema | Comando |
-| --- | --- |
-| Windows | dois cliques em `iniciar.cmd` (ou `iniciar.cmd` no terminal) |
-| Linux / macOS | `./iniciar.sh` |
+Abra **`http://localhost:4321`**. Na primeira vez, o app:
 
-O script confere a versão do Node, instala as dependências na primeira vez, cria o `app/.env` a partir do exemplo e sobe o servidor. Abra **http://localhost:4321**.
+1. pede um **usuário e senha** (uma conta só, guardada no próprio computador);
+2. explica a AUVP e pede a **chave do MCP**, depois busca suas contas, cartões e transações;
+3. mostra os cartões com o **dia de fechamento e de vencimento** aprendidos das faturas, para você conferir;
+4. sugere as **rendas** a partir das entradas que se repetem no histórico (fixa, por hora, variável ou eventual);
+5. pergunta **onde você vai usar**:
+   - **Só neste computador**: o app só abre aqui (escuta em `127.0.0.1`).
+   - **Na casa toda**: abre no celular e em outros aparelhos do mesmo Wi-Fi, com usuário e senha; o app mostra o endereço (ex.: `http://192.168.0.10:4321`). No Windows, permita o Node.js em **Redes privadas** quando o firewall perguntar.
 
-<details>
-<summary>Prefere fazer à mão?</summary>
+Dá para trocar depois em **Configurar → Acesso**. Esqueceu a senha? No computador onde o app roda, rode `npm run nova-senha` na pasta `app`: o acesso é apagado (os dados ficam) e o app pede um novo na próxima vez.
+
+### Opção 2: Docker (servidor em casa)
 
 ```bash
-cd app
-npm ci --omit=dev        # ou: npm install
-cp .env.example .env     # opcional
-npm start
-```
-
-</details>
-
-> O aviso `ExperimentalWarning: SQLite is an experimental feature` no terminal é normal.
-
----
-
-## 🧭 Primeiros passos (tutorial)
-
-Na primeira abertura o banco (`app/financas.db`) é criado vazio, já no mês corrente. Siga esta ordem — cada passo alimenta o próximo.
-
-### 1. Cadastre suas contas e cartões — *Configurar → Minhas contas e cartões*
-O banco novo vem com alguns **exemplos** (Itaú, Nubank, BTG, Mercado Pago). Edite os que você usa, desative os que não usa e crie os seus em **+ Nova Conta / Cartão**.
-Para cartão de crédito, informe **dia de fechamento** e **dia de vencimento**: é isso que decide em qual fatura cada compra cai.
-
-### 2. Informe sua renda — *Configurar → Minhas rendas*
-Salário e outras rendas líquidas, com o dia em que caem. Toda a projeção é calculada a partir daqui.
-
-### 3. Traga as transações
-Escolha uma das fontes (ou as duas):
-
-- **AUVP (Open Finance), recomendado** — em *Configurar → AUVP Financeiro*, cole a **API URL** e a **API Key** da sua conta AUVP, marque **Usar AUVP como fonte**, clique **Salvar** e depois **🔄 Sincronizar agora**.
-  A partir daí o app sincroniza sozinho a cada 6 horas enquanto estiver aberto (só leitura na AUVP). Cartões novos são descobertos e o fechamento/vencimento é aprendido das faturas.
-- **PDF** — em *Configurar → Importar PDF*, envie faturas do **Nubank, Itaú e Mercado Pago** ou extrato do **Itaú**. Use para períodos que a AUVP não cobre; o que já veio da AUVP não é duplicado.
-
-### 4. Cadastre o que se repete — *Recorrentes*
-Aluguel, condomínio, internet, plano de saúde, empréstimos e financiamentos (com número de parcelas). Depois use **Gerar próximo mês** para criar as contas do mês seguinte.
-
-### 5. Acompanhe o mês — *Contas do mês*
-Lista tudo que vence no mês. Marque como pago ou clique **⚡ Conciliar com extrato** para o app achar os pagamentos sozinho. Use **+ Novo lançamento** para algo avulso.
-
-### 6. Confirme o que ficou em dúvida — *Reconciliar*
-O app sugere qual transação pagou qual conta. Confirme ou recuse; ele aprende os padrões e acerta sozinho nas próximas vezes.
-
-### 7. Leia o resultado — *Hoje* e *Projeção*
-Pronto: veja quanto sobra no mês e nos próximos. No **🔮 Simulador: Posso comprar?** teste uma compra parcelada antes de fazê-la.
-
-**Rotina mensal:** sincronize (ou importe os PDFs), confira *Contas do mês* e *Reconciliar*, e no fim do mês clique **Gerar próximo mês** em *Recorrentes*.
-
----
-
-## 🖥️ As telas
-
-| Tela | Para que serve |
-| --- | --- |
-| **◎ Hoje** | Caixa até o fim do mês: saldo real das contas, o que ainda sai, o que ainda entra e as faturas abertas de cada cartão. |
-| **◉ Projeção** | Comprometimento dos próximos meses, **Alívio das parcelas** (quando cada parcelado acaba e quanto da renda volta), **Comprometimento futuro** e o simulador **Posso comprar?**. |
-| **☐ Contas do mês** | Tudo que vence no mês, pago ou em aberto, com conciliação automática pelo extrato. |
-| **⏱ Recorrentes** | Contas fixas e parcelados que geram os lançamentos de cada mês. |
-| **🔄 Reconciliar** | Sugestões de qual transação pagou qual conta, e os padrões aprendidos. |
-| **▤ Transações** | Gastos e entradas dia a dia, top categorias e maiores gastos. |
-| **⚙ Configurar** | Contas e cartões, rendas, AUVP e importação de PDF. |
-
-O botão de olho no topo liga o **modo privado** (esconde os valores). A interface funciona no celular.
-
----
-
-## 🐳 Instalação com Docker
-
-Requer Docker com Docker Compose v2. Os dados ficam em `app/data/` (banco e cofre da chave da AUVP).
-
-### Só na sua máquina (sem HTTPS)
-
-```bash
-cd app
-docker compose -f docker-compose.local.yml up -d
-```
-
-Acesse **http://localhost:4321** (a porta só fica aberta para esta máquina).
-
-### Em servidor, com HTTPS e senha (app + Caddy)
-
-O Caddy emite o certificado HTTPS sozinho e coloca uma tela de usuário/senha na frente do app.
-
-```bash
-cd app
-cp .env.example .env
-# gere o hash da senha:
-docker run --rm caddy:2-alpine caddy hash-password --plaintext 'sua-senha'
-```
-
-Edite o `.env`:
-
-```env
-DOMAIN=financas.seu-dominio.com
-AUTH_USER=admin
-AUTH_PASS_HASH='$2a$14$...cole.o.hash.aqui'   # mantenha as aspas simples
-```
-
-```bash
+cd leftover-finance/app
 docker compose up -d
+docker compose logs app    # mostra o código de instalação
 ```
 
-O domínio precisa apontar para o servidor e as portas 80 e 443 precisam estar livres. Para testar o Caddy na própria máquina, use `DOMAIN=localhost` e acesse https://localhost (o navegador avisa do certificado local; é esperado).
+Abra `http://IP-DA-MÁQUINA:4321` e crie usuário e senha. Como o acesso não vem do próprio computador do app, a primeira tela pede o **código de instalação** que aparece no log. Os dados e o cofre da chave ficam em `app/data/`.
 
-> **Linux:** o container roda como o usuário `node` (UID 1000). Crie a pasta antes para ela não nascer como root: `mkdir -p data && sudo chown 1000:1000 data`.
+- Para abrir só na própria máquina, troque a linha `ports` do `docker-compose.yml` para `"127.0.0.1:4321:4321"`.
+- Variáveis opcionais em `.env` (veja `.env.example`): `PORTA`, `FINANCA_ENDERECO` (endereço que o app mostra para o celular) e `AUVP_KEY`.
+
+### Acesso de fora de casa
+
+O app usa HTTP simples, pensado para a rede de casa. **Não abra a porta no roteador.** Para acessar da rua, use uma VPN como o [Tailscale](https://tailscale.com): instale no computador do app e no celular e abra o endereço do Tailscale na porta 4321.
 
 ---
 
-## ⚙️ Configuração (.env)
+## 🔑 Segurança
 
-Tudo é opcional. O arquivo `app/.env` é lido pelo `npm start` e pelo `docker compose`, e nunca vai para o git. Veja [`app/.env.example`](app/.env.example).
-
-| Variável | Padrão | O que faz |
-| --- | --- | --- |
-| `PORT` | `4321` | Porta do servidor. |
-| `FINANCA_DB` | `app/financas.db` | Caminho do banco SQLite. |
-| `AUVP_URL` / `AUVP_KEY` | — | Credenciais da AUVP. **Prefira a tela Configurar.** |
-| `AUVP_ATIVO` | — | `1` liga, `0` desliga a AUVP. Se definido, o checkbox da tela deixa de valer. |
-| `FINFLOW_COFRE` | ver abaixo | Pasta do cofre da chave da AUVP. |
-| `DOMAIN` | `localhost` | Domínio do Caddy (Docker com HTTPS). |
-| `AUTH_USER` / `AUTH_PASS_HASH` | `admin` / — | Login do Caddy; o hash é bcrypt, entre aspas simples. |
-
-### Onde fica a chave da AUVP
-
-A API Key digitada na tela **não vai para o banco**. Ela fica num cofre fora da pasta do projeto, para não acabar em backups, cópias do banco ou no git:
-
-- **Windows:** `%APPDATA%\FinFlow\auvp-chave.dpapi`, criptografada com DPAPI (só o seu usuário do Windows nesta máquina abre).
-- **Linux/macOS:** `~/.config/finflow/auvp-chave`, com permissão `600`.
-- **Docker:** `app/data/cofre/`.
-
-A API nunca devolve a chave para a interface, só se ela existe.
+- **Senha do app**: guardada só como hash (scrypt). A sessão é um cookie `HttpOnly` de 90 dias; 5 senhas erradas seguidas bloqueiam aquele aparelho por 1 minuto.
+- **Chave da AUVP**: fica no cofre local (`core/segredo.js`): no Windows, protegida pela sua conta de usuário (DPAPI); no Linux/Docker, em arquivo com permissão só do dono. Nunca vai para o banco de dados nem para as respostas da API, que só dizem se ela existe.
+- **Dados financeiros**: ficam no SQLite local (`financas.db`), que o `.gitignore` nunca deixa entrar no Git.
 
 ---
 
-## 💾 Backup, atualização e dados
+## 🤝 Contribuições
 
-- **Backup:** copie `app/financas.db` (ou `app/data/` no Docker) com o servidor parado. A chave da AUVP não está no banco; se trocar de máquina, cole-a de novo em Configurar.
-- **Atualizar:** `git pull`, depois `cd app && npm ci --omit=dev` e reinicie. No Docker: `git pull && docker compose up -d --build`. As migrações do banco rodam sozinhas ao iniciar e só acrescentam.
-- **Privacidade:** tudo roda e fica na sua máquina. O único acesso externo é a AUVP, se você ligar. O `.gitignore` bloqueia banco, PDFs, planilhas, caches e `.env`.
+Contribuições são bem-vindas! Sinta-se à vontade para abrir uma *Issue* para relatar problemas ou enviar um *Pull Request* com melhorias.
 
----
-
-## 🩺 Problemas comuns
-
-| Sintoma | Solução |
-| --- | --- |
-| `No such built-in module: node:sqlite` ou erro ao abrir o banco | Node antigo. Instale o 22.13+ (`node -v` para conferir). |
-| `EADDRINUSE: address already in use :::4321` | Já há algo na porta 4321 (talvez o próprio app aberto em outra janela). Feche-o ou use `PORT=4322` no `.env`. |
-| Caddy não sobe / senha nunca aceita | Hash sem aspas simples no `.env` (o `$` é expandido) ou `AUTH_PASS_HASH` vazio. |
-| No Docker (Linux), erro `unable to open database file` | Permissão da pasta `data/`: `sudo chown 1000:1000 data`. |
-| Checkbox "Usar AUVP como fonte" não muda nada | `AUVP_ATIVO` está definido no `.env` ou no ambiente; remova a linha. |
-| Sincronização da AUVP falha | Confira URL e chave em Configurar. O resultado da última tentativa aparece logo abaixo do botão. |
-
----
-
-## 🛠️ Para desenvolvedores
-
-### Arquitetura
-
-```mermaid
-flowchart TD
-    subgraph C1["Frontend (SPA, sem build)"]
-        UI["Telas: Hoje, Projeção, Contas do mês..."]
-        Charts["Gráficos (Chart.js)"]
-        UI --> Charts
-    end
-
-    subgraph C2["Backend (Node.js + Express)"]
-        API["API REST (/api)"]
-        Core["Núcleo de comprometimento (core/)"]
-        Parser["Super Parser de PDF"]
-        Conc["Conciliação e regras"]
-        Sync["Sincronização AUVP (a cada 6h)"]
-
-        API --> Core
-        API --> Parser
-        API --> Conc
-        API --> Sync
-    end
-
-    subgraph C3["Persistência local"]
-        DB[("SQLite (financas.db)")]
-        Cofre["Cofre da chave (DPAPI / arquivo 600)"]
-    end
-
-    AUVP["Open Finance (AUVP / MCP)"]
-
-    UI -->|HTTP| API
-    Core --> DB
-    Parser --> DB
-    Conc --> DB
-    Sync --> DB
-    Sync --> Cofre
-    Sync --> AUVP
-```
-
-### Estrutura
-
-```text
-leftover-finance/
-├── iniciar.cmd / iniciar.sh   # instala na primeira vez e sobe o app
-├── README.md
-├── LICENSE
-└── app/
-    ├── server.js              # Express: rotas da API e arquivos estáticos
-    ├── db.js                  # schema SQLite, migrações aditivas e dados iniciais
-    ├── package.json
-    ├── .env.example           # modelo de configuração
-    ├── Dockerfile
-    ├── docker-compose.yml     # app + Caddy (HTTPS e senha)
-    ├── docker-compose.local.yml # só o app, em localhost:4321
-    ├── Caddyfile
-    ├── core/                  # regras de negócio centrais
-    │   ├── comprometido.js    # motor único: faturas, parcelas, renda e sobra
-    │   ├── calendario.js      # meses, dias úteis, feriados e data de Brasília
-    │   ├── auvp-sync.js       # sincronização com a AUVP (só leitura)
-    │   └── segredo.js         # cofre da chave da AUVP
-    ├── scripts/               # módulos de apoio
-    │   ├── auvp-client.js     # cliente MCP da AUVP (sessão, rate limit, retry)
-    │   ├── sync-diario.js     # sincronização automática em segundo plano
-    │   ├── super-parser.js    # detecta o banco e lê o PDF
-    │   ├── parse-*.js         # parsers de Itaú, Nubank, Mercado Pago e extrato
-    │   ├── conciliacao.js     # liga transações às contas do mês
-    │   ├── heuristico.js, motor-regras.js, regras-seed.js  # categorização
-    │   ├── contas.js, saldos.js, renda-realizada.js, compromisso-mes.js
-    │   ├── check-consistencia.js  # confere os painéis entre si após o sync
-    │   └── import.js          # importa a planilha legada (npm run import)
-    ├── public/                # frontend estático (index.html, app.js, style.css)
-    └── test/                  # teste de ouro (npm test)
-```
-
-### Comandos
-
-```bash
-cd app
-npm install     # inclui dependências de desenvolvimento
-npm start       # http://localhost:4321
-npm test        # teste de ouro
-```
-
-O **teste de ouro** confere o sistema contra um retrato real (banco + AUVP + valores conferidos nos apps dos bancos). Esses dados são pessoais e ficam em `app/test/fixtures/`, fora do git; sem eles o teste é pulado.
-
-### Contribuições
-
-Issues e Pull Requests são bem-vindos.
-
-1. Faça um fork
-2. Crie uma branch (`git checkout -b feature/nova-funcionalidade`)
-3. Commit (`git commit -m 'feat: adiciona nova funcionalidade'`)
-4. Push (`git push origin feature/nova-funcionalidade`)
+1. Faça um Fork do projeto
+2. Crie uma branch para a sua feature (`git checkout -b feature/nova-funcionalidade`)
+3. Faça o commit das suas alterações (`git commit -m 'feat: adiciona nova funcionalidade'`)
+4. Faça o push para a branch (`git push origin feature/nova-funcionalidade`)
 5. Abra um Pull Request
 
 ---
 
 ## 📄 Licença
 
-Distribuído sob a licença **MIT**. Veja [`LICENSE`](LICENSE).
+Distribuído sob a licença **MIT**. Consulte o arquivo [`LICENSE`](LICENSE) para mais detalhes.
+

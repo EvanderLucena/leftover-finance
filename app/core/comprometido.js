@@ -15,7 +15,10 @@ const parcelaDaDescricao = d => {
 };
 // "VET CENTERPRESIDEN02/03" -> "VETCENTERPRESIDEN"
 const baseDescricao = s => String(s || '').toUpperCase().replace(/\s*0?\d{1,2}\/0?\d{1,2}\s*$/, '').replace(/[^A-Z0-9]/g, '');
-const ICONES = { nubank_cartao: '🟣', itau_cartao: '🟧', mp_cartao: '💙', cartao_btg_black: '⬛' };
+// ícone de cada cartão: o da conta em Configurar
+const iconeDe = contaLocal => (contaLocal && (db.prepare('SELECT icone FROM contas_bancarias WHERE id = ?').get(contaLocal) || {}).icone) || '💳';
+
+const { casaRenda, estimativa } = require('./rendas');
 
 const cartoesAtivos = () => db.prepare('SELECT * FROM cartoes WHERE incluir=1 ORDER BY conta_id').all();
 
@@ -119,7 +122,7 @@ function faturasDoCartao(c, hoje) {
 function faturasDoMes(ym, hoje) {
   return cartoesAtivos().map(c => {
     const f = faturasDoCartao(c, hoje).porMes.get(ym);
-    return f ? { cartao: c.nome, conta_local: c.conta_local, conta_id: c.conta_id, icone: ICONES[c.conta_local] || '💳', ...f } : null;
+    return f ? { cartao: c.nome, conta_local: c.conta_local, conta_id: c.conta_id, icone: iconeDe(c.conta_local), ...f } : null;
   }).filter(f => f && f.total !== 0);
 }
 
@@ -183,8 +186,7 @@ function contasDoMes(ym) {
 
 // ---------- gasto do dia a dia já realizado (só o mês corrente) ----------
 function diaADiaRealizado(ym) {
-  const cartoes = db.prepare('SELECT conta_local FROM cartoes').all().map(r => r.conta_local);
-  const fontesCartao = ['nubank', 'itau-fatura', 'mercadopago', 'auvp-mcp', 'nubank-csv'];
+  const fontesCartao = require('./fontes').fontesCartao();
   return r2(db.prepare(`SELECT COALESCE(SUM(ABS(valor)),0) tot FROM transacoes t
     WHERE t.natureza='gasto' AND substr(t.data,1,7)=? AND t.valor < 0
       AND t.fonte NOT IN (${fontesCartao.map(() => '?').join(',')})
@@ -192,13 +194,13 @@ function diaADiaRealizado(ym) {
 }
 
 // ---------- renda por competência ----------
-function rendaDoMes(ym) {
+function rendaDoMes(ym, hoje = cal.hojeISO()) {
   const rendas = db.prepare('SELECT * FROM rendas WHERE ativo=1').all();
-  const creditos = db.prepare(`SELECT data, valor, descricao FROM transacoes WHERE valor > 0 AND natureza IN ('salario','entrada','entrada-outra')
+  const creditos = db.prepare(`SELECT data, valor, descricao, hash_unico FROM transacoes WHERE valor > 0 AND natureza IN ('salario','entrada','entrada-outra')
     AND data >= ? AND data < ?`).all(cal.addMes(ym, -1) + '-01', cal.addMes(ym, 1) + '-01');
   const itens = rendas.map(r => {
-    const estimada = r2(r.tipo === 'horas' ? (r.valor_hora || 0) * (r.horas_previstas || 168) : (r.valor_base || 0));
-    const casa = t => (r.valor_exato != null ? Math.abs(t.valor - r.valor_exato) < 0.005 : (r.padrao_regex ? new RegExp(r.padrao_regex, 'i').test(t.descricao) : false));
+    const estimada = estimativa(r, hoje);
+    const casa = casaRenda(r);
     const competencia = t => (r.competencia_corte && +t.data.slice(8, 10) >= r.competencia_corte ? cal.addMes(t.data.slice(0, 7), 1) : t.data.slice(0, 7));
     const reais = creditos.filter(t => casa(t) && competencia(t) === ym);
     const realizada = r2(reais.reduce((s, t) => s + t.valor, 0));
@@ -215,7 +217,7 @@ function comprometidoMes(ym, hoje = cal.hojeISO()) {
   const parcelados = r2(contas.itens.filter(i => i.tipo === 'parcelado').reduce((s, i) => s + i.valor, 0));
   const totalFaturas = r2(faturas.reduce((s, f) => s + f.total, 0));
   const diaADia = ym === hoje.slice(0, 7) ? diaADiaRealizado(ym) : 0;
-  const renda = rendaDoMes(ym);
+  const renda = rendaDoMes(ym, hoje);
   const comprometido = r2(totalFaturas + fixos + parcelados + diaADia);
   return {
     mes: cal.ymParaRef(ym), mes_iso: ym, faturas, total_faturas: totalFaturas,
@@ -237,7 +239,7 @@ function faturasAbertas(hoje = cal.hojeISO()) {
   const cartoes = cartoesAtivos().map(c => {
     const { aberta, porMes } = faturasDoCartao(c, hoje);
     const f = porMes.get(aberta) || { total: 0, parcelas: 0, compras: 0, itens: [], vencimento: vencimentoDe(aberta, c), fechamento: cal.diaDoMes(cal.addMes(aberta, -1), c.fecha_dia) };
-    return { id: c.conta_local, conta_id: c.conta_id, nome: c.nome, icone: ICONES[c.conta_local] || '💳', mes: aberta,
+    return { id: c.conta_local, conta_id: c.conta_id, nome: c.nome, icone: iconeDe(c.conta_local), mes: aberta,
       fechamento: f.fechamento, vencimento: f.vencimento, parcelas_agendadas: f.parcelas, compras_ciclo: f.compras, total: f.total, itens: f.itens, configurado: true };
   });
   const meses = cartoes.map(c => c.mes).sort();
@@ -369,16 +371,16 @@ function caixaAteFimDoMes(disponivel, hoje = cal.hojeISO()) {
   aPagar.sort((a, b) => a.vencimento.localeCompare(b.vencimento));
 
   // a receber: renda que ainda cai no caixa deste mês (pela data em que o dinheiro entra, não pela competência)
-  const creditos = db.prepare(`SELECT data, valor, descricao FROM transacoes WHERE valor > 0 AND natureza IN ('salario','entrada','entrada-outra')
+  const creditos = db.prepare(`SELECT data, valor, descricao, hash_unico FROM transacoes WHERE valor > 0 AND natureza IN ('salario','entrada','entrada-outra')
     AND data >= ? AND data <= ?`).all(ym + '-01', fim);
-  const estimadas = new Map([...rendaDoMes(ym).itens, ...rendaDoMes(cal.addMes(ym, 1)).itens].map(i => [i.id, i.estimada]));
+  const estimadas = new Map([...rendaDoMes(ym, hoje).itens, ...rendaDoMes(cal.addMes(ym, 1), hoje).itens].map(i => [i.id, i.estimada]));
   const aReceber = [];
   for (const r of db.prepare('SELECT * FROM rendas WHERE ativo=1').all()) {
-    const casa = t => (r.valor_exato != null ? Math.abs(t.valor - r.valor_exato) < 0.005 : (r.padrao_regex ? new RegExp(r.padrao_regex, 'i').test(t.descricao) : false));
+    const casa = casaRenda(r);
     // quem tem corte de competência recebe no fim do mês (último dia útil); os demais no dia de pagamento
     const previsto = r.competencia_corte ? cal.ultimoDiaUtil(ym) : cal.diaDoMes(ym, r.dia_pagamento || 5);
     const jaCaiu = creditos.some(t => casa(t) && (!r.competencia_corte || +t.data.slice(8, 10) >= r.competencia_corte));
-    if (!jaCaiu) aReceber.push({ renda_id: r.id, nome: r.nome, valor: estimadas.get(r.id) || 0, previsto, atrasada: previsto < hoje });
+    if (!jaCaiu && r.tipo !== 'eventual') aReceber.push({ renda_id: r.id, nome: r.nome, valor: estimadas.get(r.id) || 0, previsto, atrasada: previsto < hoje });
   }
 
   const totPagar = r2(aPagar.reduce((s, x) => s + x.valor, 0));

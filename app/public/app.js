@@ -41,6 +41,7 @@ let charts = {};
 
 async function api(url, opts) {
   const r = await fetch(url, opts);
+  if (r.status === 401) { location.href = '/entrar.html'; throw new Error('entre no app primeiro'); }
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.erro || r.statusText); }
   return r.json();
 }
@@ -165,9 +166,17 @@ function barraPeriodo(rootId, storageKey, onChange) {
   };
 }
 
+// mesma largura do @media do celular no style.css
+const ehCelular = () => matchMedia('(max-width: 760px)').matches;
+
 // ---------- navegação ----------
 const VIEWS = ['visao', 'extratos', 'projecao', 'mes', 'recorrentes', 'reconciliar', 'configurar'];
+const sidebar = document.querySelector('.sidebar');
+document.getElementById('nav-mais').onclick = e => { e.stopPropagation(); sidebar.classList.toggle('mais'); };
+document.addEventListener('click', e => { if (!sidebar.contains(e.target)) sidebar.classList.remove('mais'); });
 document.querySelectorAll('.nav-item[data-view]').forEach(b => b.onclick = () => {
+  sidebar.classList.remove('mais');
+  window.scrollTo(0, 0);
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
   VIEWS.forEach(v => document.getElementById('view-' + v).hidden = v !== b.dataset.view);
@@ -300,16 +309,11 @@ function chartOpts() {
 }
 
 // ---------- EXTRATOS & LIVRO-RAZÃO UNIFICADO ----------
-const NOME_FONTE = {
-  'itau-conta': 'Itaú conta',
-  'itau-fatura': 'Itaú Visa',
-  'nubank': 'Nubank fatura',
-  'nubank-conta': 'Nubank conta',
-  'mercadopago': 'Mercado Pago',
-  'auvp-mcp': 'AUVP cartão',
-  'auvp-bank': 'AUVP conta',
-  'btg': 'BTG Banking'
-};
+// nome de cada fonte: as da AUVP têm nome fixo; as importações antigas levam o nome da conta (Configurar)
+const NOME_FONTE = { 'auvp-mcp': 'Cartão (AUVP)', 'auvp-bank': 'Conta (AUVP)', manual: 'Lançado à mão' };
+api('/api/contas?todas=1').then(contas => {
+  for (const c of contas || []) for (const f of c.fontes || []) if (!NOME_FONTE[f]) NOME_FONTE[f] = c.nome;
+}).catch(() => {});
 const nomeFonte = f => NOME_FONTE[f] || f || '—';
 
 const NAT_ROTULO = {
@@ -746,7 +750,7 @@ function renderizarAnalyticsVisual(resumo, rows) {
           const dataFmt = t.data ? t.data.slice(5) : '';
           const fonteFmt = nomeFonte(t.fonte);
           return `
-            <div class="ext-top-row" style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" title="Duplo-clique para editar">
+            <div class="ext-top-row" style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" onclick="if (ehCelular()) abrirEdicaoTx(${t.id})" title="Duplo-clique para editar">
               <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
                 <span style="color:var(--txt); font-weight:600;">${desc.slice(0, 22)}</span>
                 <span class="muted" style="font-size:10.5px; margin-left:4px;">${dataFmt} · ${fonteFmt}</span>
@@ -853,8 +857,8 @@ function renderizarTabelaOuAgrupado() {
           : '<span class="muted" style="font-size:11px;">—</span>';
 
         const catHtml = t.categoria
-          ? `<span class="tag" style="cursor:pointer;" onclick="filtrarPorCategoria(this.dataset.cat)" data-cat="${t.categoria}" title="Filtrar por ${t.categoria}">${t.categoria}</span>`
-          : `<span class="tag" style="background:rgba(255,180,84,.15); color:var(--amber); cursor:pointer; font-size:11px;" onclick="abrirEdicaoTx(${t.id})" title="Clique para categorizar">⚠️ Sem categoria</span>`;
+          ? `<span class="tag" style="cursor:pointer;" onclick="event.stopPropagation(); filtrarPorCategoria(this.dataset.cat)" data-cat="${t.categoria}" title="Filtrar por ${t.categoria}">${t.categoria}</span>`
+          : `<span class="tag" style="background:rgba(255,180,84,.15); color:var(--amber); cursor:pointer; font-size:11px;" onclick="event.stopPropagation(); abrirEdicaoTx(${t.id})" title="Clique para categorizar">⚠️ Sem categoria</span>`;
 
         const obsHtml = t.observacao ? ` <span class="muted" title="${t.observacao}" style="cursor:help;">${ico('note')}</span>` : '';
         const parcelaHtml = t.parcela ? ` <span class="tag" style="font-size:10.5px; padding:1px 5px; color:var(--cyan); background:rgba(0,214,143,.1);">${t.parcela}</span>` : '';
@@ -879,7 +883,7 @@ function renderizarTabelaOuAgrupado() {
           : (ehNeutro ? 'Movimentação neutra (transferência/pagamento de fatura). Duplo-clique para editar' : 'Duplo-clique para editar');
 
         return `
-          <tr class="${classeLinha}" style="cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" title="${titleLinha}">
+          <tr class="${classeLinha}" style="cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" onclick="if (ehCelular()) abrirEdicaoTx(${t.id})" title="${titleLinha}">
             <td class="muted mono" style="font-size:12px;">${t.data}</td>
             <td>
               ${badgeOculta}<span style="font-weight:600; color:${ehNeutro ? 'var(--muted)' : 'var(--txt)'};">${t.descricao}</span>
@@ -1134,13 +1138,13 @@ async function loadProjecao() {
     heroEl.innerHTML = `
       <div class="ph-main">
         <span class="lbl">COMPROMETIDO ATÉ HOJE · ${mesCurto(m1.mes).toUpperCase()}</span>
-        <span class="num ${m1.sobra_livre > 0 ? 'up' : 'down'}">${fmt(m1.comprometido)}<small> (${pctComprometidoM1}% da renda)</small></span>
+        <span class="num ${m1.sobra_livre > 0 ? 'up' : 'down'}">${fmt(m1.comprometido)}<small> (${p.renda_projetada > 0 || m1.renda > 0 ? pctComprometidoM1 + '% da renda' : 'nenhuma renda cadastrada'})</small></span>
         <div class="ph-barra"><i style="width:${Math.min(100, Math.max(0, pctComprometidoM1))}%"></i></div>
         <span class="sub muted">
-          Faturas: ${fmt(m1.parcelas_cartao || 0)} · Fixos: ${fmt(m1.fixos || 0)} · Parcelados: ${fmt(m1.parcelas_externas || 0)}${m1.dia_a_dia ? ' · Dia a dia já gasto: ' + fmt(m1.dia_a_dia) : ''} · Renda: ${fmt(m1.renda)} · Sobra livre: <b class="up">${fmt(m1.sobra_livre)}</b>
+          Faturas: ${fmt(m1.parcelas_cartao || 0)} · Fixos: ${fmt(m1.fixos || 0)} · Parcelados: ${fmt(m1.parcelas_externas || 0)}${m1.dia_a_dia ? ' · Dia a dia já gasto: ' + fmt(m1.dia_a_dia) : ''} · Renda: ${fmt(m1.renda)} · Sobra livre: <b class="${m1.sobra_livre < 0 ? 'down' : 'up'}">${fmt(m1.sobra_livre)}</b>
         </span>
         <div class="ph-trajectory">
-          <span>Só o que já foi gasto ou está agendado: o comprometido até hoje cai de <b>${pctComprometidoM1}%</b> (${mesCurto(m1.mes)}) para <b>${pctComprometidoM12}%</b> (${mesCurto(m12.mes)}) conforme as parcelas terminam. Compras novas entram quando acontecerem.</span>
+          ${!(p.renda_projetada > 0 || m1.renda > 0) ? `<span>Cadastre suas rendas em <b>Configurar → Minhas rendas</b> para ver quanto do que entra já está comprometido e quanto sobra.</span>` : `<span>Só o que já foi gasto ou está agendado: o comprometido até hoje cai de <b>${pctComprometidoM1}%</b> (${mesCurto(m1.mes)}) para <b>${pctComprometidoM12}%</b> (${mesCurto(m12.mes)}) conforme as parcelas terminam. Compras novas entram quando acontecerem.</span>`}
           <span style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;"><button class="ghost" id="proj-btn-auvp">🔄 Atualizar da AUVP</button><button class="ghost" onclick="abrirModalFaturasAbertas()">💳 Conferir faturas com o app</button></span>
         </div>
       </div>
@@ -1278,9 +1282,6 @@ async function loadProjecao() {
   const _ticker = document.getElementById('proj-ticker');
   if (_ticker) _ticker.innerHTML = '';
 
-  // rendas agora moram na aba Configurar (renderizadas em loadConfigurar)
-  await renderRendasConfig(p.rendas || []);
-
   // legenda HTML — cores validadas no fundo #10161f; "Parcelados" usa a mesma cor de "Fora do cartão" no Alívio
   const COR_PROJ = { fixos: '#3987e5', faturas: '#c98500', parcelados: '#d55181', dia: '#9085e9', sobra: '#00d68f' };
   const temDiaADia = serieV2.some(s => s.dia_a_dia > 0);
@@ -1355,9 +1356,10 @@ async function loadProjecao() {
   // só o que já foi comprado (regra de 15/10/2026); "livre a partir de" = mês seguinte à última parcela
   const dividasLista = dividas.emAndamento || [];
   const linha = (dividas.linha_do_tempo || []).filter(l => l.total > 0);
-  const ORDEM_FONTES = ['Itaú', 'Nubank', 'Mercado Pago', 'BTG', 'Fora do cartão'];
-  const CORES_FONTES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181']; // validada no fundo #10161f
-  const idxFonte = f => { const i = ORDEM_FONTES.findIndex(n => String(f || '').startsWith(n)); return i < 0 ? ORDEM_FONTES.length : i; };
+  const CORES_FONTES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#8a63d2']; // validada no fundo #10161f
+  // ordem dos cartões pelo nome (estável entre meses), "Fora do cartão" por último
+  const ORDEM_FONTES = [...new Set((dividas.emAndamento || []).map(d => d.fonte).filter(f => f !== 'Fora do cartão'))].sort((x, y) => x.localeCompare(y, 'pt-BR')).concat('Fora do cartão');
+  const idxFonte = f => { const i = ORDEM_FONTES.indexOf(f); return i < 0 ? ORDEM_FONTES.length : i; };
   const corFonte = f => CORES_FONTES[idxFonte(f)] || '#64788f'; // a cor segue o cartão, nunca a posição
   const nomeFonte = f => String(f || '').replace(/\s*\(.*\)$/, '');
   const fontes = [...new Set(dividasLista.map(d => d.fonte))].sort((a, b) => idxFonte(a) - idxFonte(b));
@@ -1542,17 +1544,17 @@ function renderTabelaMes() {
     // transação anexada (fonte da verdade do pagamento)
     const tx = l.pago
       ? (l.transacao_id && l.transacao_desc
-        ? `<div class="tx-anexada" title="clique pra trocar a transação anexada" style="cursor:pointer" onclick="event.stopPropagation(); anexarPagamentoPago(${l.id})">↳ ${l.transacao_desc.slice(0, 34)} <span class="muted">${(l.transacao_data || '').slice(5)} · ${(l.transacao_fonte || '').replace('auvp-', 'auvp ')}</span> <span style="color:var(--blue); font-size:10px;">[trocar]</span></div>`
-        : `<div class="tx-anexada sem" title="clique pra anexar a transação que pagou" style="cursor:pointer" onclick="event.stopPropagation(); anexarPagamentoPago(${l.id})">↳ <span class="muted">marcado pago sem extrato</span> <span style="color:var(--blue); font-size:10px;">[anexar]</span></div>`)
+        ? `<div class="tx-anexada" title="clique pra trocar a transação anexada" style="cursor:pointer" onclick="event.stopPropagation(); abrirConta(${l.id})">↳ ${l.transacao_desc.slice(0, 34)} <span class="muted">${(l.transacao_data || '').slice(5)} · ${(l.transacao_fonte || '').replace('auvp-', 'auvp ')}</span> <span style="color:var(--blue); font-size:10px;">[trocar]</span></div>`
+        : `<div class="tx-anexada sem" title="clique pra anexar a transação que pagou" style="cursor:pointer" onclick="event.stopPropagation(); abrirConta(${l.id})">↳ <span class="muted">marcado pago sem extrato</span> <span style="color:var(--blue); font-size:10px;">[anexar]</span></div>`)
       : '';
-    return `<tr style="${urgente}; cursor:pointer" ondblclick="editarLanc(${l.id})" title="Duplo clique para editar">
-      <td><span class="badge ${st}" style="cursor:pointer; user-select:none;" onclick="event.stopPropagation(); togglePago(${l.id})" title="${l.pago ? 'Clique para desmarcar' : 'Clique para anexar pagamento'}">${st.toUpperCase()}</span></td>
+    return `<tr class="linha-conta" style="${urgente}; cursor:pointer" onclick="abrirConta(${l.id})" title="Clique para ver o pagamento ou editar">
+      <td><span class="badge ${st}" style="cursor:pointer; user-select:none;" onclick="event.stopPropagation(); abrirConta(${l.id})">${st.toUpperCase()}</span></td>
       <td><div class="lanc-nome"><b>${l.descricao}</b> ${l.parcela ? `<span class="muted">(${l.parcela})</span>` : ''} ${badgeTipo}</div>${tx}</td>
       <td class="mono" style="font-weight:600">${fmt(l.valor)}</td>
       <td class="muted mono">${fmtD(l.vencimento)}</td>
       <td>${l.categoria ? `<span class="tag">${l.categoria}</span>` : '<span class="muted">—</span>'}</td>
       <td style="text-align:right; white-space:nowrap;">
-        <button class="ghost" style="padding:4px 8px; font-size:12px; margin-right:4px;" onclick="event.stopPropagation(); editarLanc(${l.id})" title="Editar">${ico('note')}</button>
+        <button class="ghost" style="padding:4px 8px; font-size:12px; margin-right:4px;" onclick="event.stopPropagation(); abrirConta(${l.id}, null, { editar: true })" title="Editar">${ico('note')}</button>
         <button class="ghost" style="padding:4px 8px; font-size:12px; color:var(--red);" onclick="event.stopPropagation(); delLanc(${l.id})" title="Excluir">${ico('trash')}</button>
       </td>
     </tr>`;
@@ -1610,6 +1612,7 @@ function addDays(dateStr, days) { const d = new Date(dateStr); d.setDate(d.getDa
 
 // dialog de edição de lançamento (novo ou existente)
 window.editarLanc = async function (id) {
+  if (id) return abrirConta(id, null, { editar: true }); // conta existente: janela da conta
   const cats = await api('/api/categorias');
   const f = document.getElementById('form-lanc');
   document.getElementById('f-categoria').innerHTML = '<option value="">—</option>' + cats.map(c => `<option>${c.nome}</option>`).join('');
@@ -1635,23 +1638,9 @@ window.editarLanc = async function (id) {
   }
   document.getElementById('dlg-lanc').showModal();
 };
-window.togglePago = async function (id) {
-  const rows = await api('/api/lancamentos?mes=' + mesAtual);
-  const l = rows.find(x => x.id === id);
-  if (!l) return;
-  // PAGANDO: abre dialog de anexar com opção de pular (não obrigatório)
-  if (!l.pago) { dialogAnexarPagamento(l, loadMes, { podePular: true }); return; }
-  // DESMARCANDO: volta a em aberto direto
-  await api('/api/lancamentos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: false, transacao_id: null }) });
-  loadMes();
-};
-// (re)anexar transação em conta JÁ PAGA — mesmo dialog, atualiza valor/data/vínculo
-window.anexarPagamentoPago = function (id) {
-  api('/api/lancamentos?mes=' + mesAtual).then(rows => {
-    const l = rows.find(x => x.id === id);
-    if (l) dialogAnexarPagamento(l, loadMes);
-  });
-};
+// status e pagamento ligado: tudo na janela da conta (abrirConta)
+window.togglePago = id => abrirConta(id);
+window.anexarPagamentoPago = id => abrirConta(id);
 window.delLanc = async function (id) {
   if (!confirm('Excluir lançamento?')) return;
   await api('/api/lancamentos/' + id, { method: 'DELETE' });
@@ -1725,7 +1714,7 @@ function renderTabelaRecorrentes() {
     tb.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:30px; color:var(--muted);">Nenhuma recorrência encontrada</td></tr>`;
   } else {
     tb.innerHTML = filtradas.map(r => `
-      <tr style="cursor:pointer" ondblclick="editarRec(${r.id})" title="Duplo clique para editar">
+      <tr style="cursor:pointer" ondblclick="editarRec(${r.id})" onclick="if (ehCelular()) editarRec(${r.id})" title="Duplo clique para editar">
         <td>
           <span class="badge ${r.ativo ? 'pago' : 'vencido'}" style="cursor:pointer; user-select:none;" onclick="event.stopPropagation(); toggleRec(${r.id})" title="Clique para ${r.ativo ? 'pausar' : 'ativar'}">
             ${r.ativo ? 'ATIVA' : 'PAUSADA'}
@@ -1784,6 +1773,7 @@ if (_recStatus) _recStatus.onchange = renderTabelaRecorrentes;
 async function loadRecorrentes() {
   _recRows = await api('/api/recorrentes');
   renderTabelaRecorrentes();
+  renderFixasRecorrentes();
 
   // status do próximo mês: o que será gerado
   const st = document.getElementById('rec-gerar-status');
@@ -1895,13 +1885,6 @@ document.getElementById('form-rec').onsubmit = async e => {
   loadRecorrentes();
   toast('Recorrência salva com sucesso');
 };
-
-// ---------- IMPORTAR PDF (opcional, dentro de Configurar) ----------
-async function loadImportar() {
-  const hist = await api('/api/importacoes/historico').catch(() => []);
-  document.getElementById('imp-hist').innerHTML = hist.slice(0, 14).map(h =>
-    `<tr><td class="muted">${(h.data_importacao || '').slice(0, 16)}</td><td>${(h.arquivo || '').slice(0, 50)}</td><td>${h.tipo}</td><td>${h.linhas}</td></tr>`).join('');
-}
 
 // painel de conciliação
 async function carregarConciliacao() {
@@ -2031,93 +2014,7 @@ window.anexarConta = async function (lancId, txId) {
 };
 
 // ---------- dialog universal "anexar pagamento" (usado em Contas do mês e Reconciliar) ----------
-window.dialogAnexarPagamento = async function (lanc, aoConcluir, opts = {}) {
-  const podePular = opts.podePular !== false;
-  const modal = document.createElement('dialog');
-  modal.className = 'dlg-anexar';
-  modal.innerHTML = `
-    <div class="dlg-anexar-h">
-      <div>
-        <h3>${lanc.descricao} ${lanc.parcela || ''}</h3>
-        <p class="muted">previsto ${fmt(lanc.valor)} · venc ${lanc.vencimento} · escolha a transação que pagou essa conta</p>
-      </div>
-      <button class="dlg-x" title="fechar">${ico('x')}</button>
-    </div>
-    <input type="search" id="anx-busca" class="fselect" style="width:100%; margin-bottom:12px;" placeholder="buscar na descrição…">
-    <div class="dlg-anexar-lista" id="anx-lista"></div>
-    <div class="dlg-anexar-foot">
-      <span class="muted">a conta fica PAGA com a data da transação · valor atualizado pro real</span>
-      <button class="ghost" id="anx-pular">pular anexo — só marcar pago</button>
-      <button class="ghost" id="anx-naoachei">não achei — marcar pago sem transação</button>
-    </div>`;
-  document.body.appendChild(modal);
-  modal.showModal();
-  const lista = modal.querySelector('#anx-lista');
-  let itens = [];
-
-  async function carregar(busca) {
-    itens = await api(`/api/lancamentos/${lanc.id}/candidatos?busca=${encodeURIComponent(busca || '')}`);
-    if (!itens.length) { lista.innerHTML = `<div class="rec-empty">nenhuma transação ${busca ? 'com "' + busca + '"' : 'no período (±35 dias do vencimento)'}<br><span style="font-size:11px;">pagueu por outro canal? use o botão abaixo</span></div>`; return; }
-    lista.innerHTML = itens.map((t, i) => {
-      const dif = Math.abs(Math.abs(t.valor) - Math.abs(lanc.valor));
-      const dtFmt = t.data ? (t.data.slice(8, 10) + '/' + t.data.slice(5, 7)) : '';
-      return `<button class="anx-item" data-id="${t.id}" style="animation-delay:${Math.min(i * 20, 300)}ms">
-        <span class="anx-desc">${t.descricao.slice(0, 42)}</span>
-        <span class="anx-meta">${dtFmt} · ${(t.fonte || '').replace('auvp-', 'auvp ')}</span>
-        <span class="anx-val">${fmt(t.valor)}</span>
-        ${dif > 0.01 ? `<span class="anx-dif" title="conta será atualizada pro valor pago">±${fmt(dif)}</span>` : '<span class="anx-dif ok">exato</span>'}
-      </button>`;
-    }).join('');
-    lista.querySelectorAll('.anx-item').forEach(b => b.onclick = () => escolher(Number(b.dataset.id)));
-  }
-  async function escolher(txId) {
-    const r = await api('/api/contas-mes-reconciliar/anexar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lancamento_id: lanc.id, transacao_id: txId }) });
-    if (r.erro) { toast('Erro: ' + r.erro); return; }
-    modal.remove();
-    toast(r.valorAtualizado ? 'PAGA — valor atualizado pro real + padrão aprendido' : 'PAGA — padrão aprendido');
-    aoConcluir && aoConcluir();
-  }
-  modal.querySelector('#anx-busca').oninput = e => { clearTimeout(modal._t); modal._t = setTimeout(() => carregar(e.target.value), 250); };
-  modal.querySelector('.dlg-x').onclick = () => modal.remove();
-  if (podePular) {
-    modal.querySelector('#anx-pular').onclick = async () => {
-      await api('/api/lancamentos/' + lanc.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: true }) });
-      modal.remove();
-      toast('PAGA (sem transação anexada — pode anexar depois clicando nela)');
-      aoConcluir && aoConcluir();
-    };
-  } else {
-    const p = modal.querySelector('#anx-pular');
-    if (p) p.remove();
-  }
-  modal.querySelector('#anx-naoachei').onclick = async () => {
-    const btn = modal.querySelector('#anx-naoachei');
-    if (btn.dataset.conf !== '1') { btn.textContent = 'confirmar: pagar sem transação anexada?'; btn.dataset.conf = '1'; btn.style.color = 'var(--amber)'; return; }
-    await api('/api/lancamentos/' + lanc.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pago: true }) });
-    modal.remove();
-    toast('PAGA (sem transação anexada)');
-    aoConcluir && aoConcluir();
-  };
-  await carregar('');
-};
-
-document.getElementById('file-pdf').onchange = async e => {
-  const log = document.getElementById('import-log');
-  for (const f of [...e.target.files]) {
-    log.innerHTML += `<div>processando ${f.name}...</div>`;
-    const buf = await f.arrayBuffer();
-    try {
-      const r = await fetch('/api/extratos/importar-pdf', { method: 'POST', headers: { 'Content-Type': 'application/pdf', 'X-Arquivo': f.name }, body: buf });
-      const d = await r.json();
-      if (d.jaImportado) {
-        log.innerHTML += `<div style="color:var(--amber)">${ico('warn')} ${f.name}: este arquivo JÁ FOI importado em ${(d.importacao_anterior || '').slice(0, 10)} — ${d.inseridas} novas (as ${d.duplicadas} restantes já existiam, nada duplicado)</div>`;
-      } else {
-        log.innerHTML += `<div class="up">${ico('check')} ${f.name}: ${d.inseridas} novas, ${d.duplicadas} duplicadas</div>`;
-      }
-    } catch (err) { log.innerHTML += `<div style="color:var(--red)">${ico('x')} ${f.name}: ${err.message}</div>`; }
-  }
-  toast('Importação concluída — confira as sugestões em Reconciliar');
-};
+window.dialogAnexarPagamento = (lanc, aoConcluir) => abrirConta(lanc.id, aoConcluir);
 
 // ---------- CONFIGURAR ----------
 // drill-down: Raio-X 360 do mês (clique na barra da projeção)
@@ -2444,33 +2341,126 @@ function projTooltipHTML(context) {
   el.style.top = y + 'px';
 }
 
-// rendas (renderiza no painel de Configurar; usada por loadConfigurar e loadProjecao)
-async function renderRendasConfig(rendas) {
-  const el = document.getElementById('p-rendas');
+// rendas (painel de Configurar; o assistente da primeira inicialização usa as mesmas funções)
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const TIPO_RENDA = {
+  fixa: 'Fixa — o mesmo valor todo mês',
+  horas: 'Por hora — valor da hora × horas do mês',
+  variavel: 'Variável — média dos últimos 3 meses',
+  eventual: 'Eventual — só conta quando cair'
+};
+const jsonPost = (url, body, method = 'POST') => api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+async function renderRendasConfig(el = document.getElementById('p-rendas')) {
   if (!el) return;
-  el.innerHTML = rendas.map(r => `
-    <div class="renda-item"
- data-id="${r.id}" style="background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; font-size:15px;">
-        <b>${r.nome}</b><span class="muted">${r.tipo === 'horas' ? `${r.valor_hora}/h × ${r.horas_previstas || 168}h` : 'fixo'}</span>
+  const rendas = await api('/api/rendas').catch(() => []);
+  el.innerHTML = (rendas.length ? '' : '<p class="muted" style="font-size:13px;">Nenhuma renda cadastrada ainda. Veja abaixo as entradas que se repetem no seu histórico, ou cadastre uma.</p>')
+    + rendas.map(r => `
+    <div class="renda-item" data-id="${r.id}">
+      <div class="renda-topo">
+        <input class="renda-nome" data-field="nome" value="${esc(r.nome)}">
+        <button class="ghost renda-x" title="Remover renda">${ico('trash')}</button>
       </div>
-      <div style="display:flex; gap:14px; margin-top:10px;">
+      <div class="renda-campos">
+        <label>Tipo <select data-field="tipo">${Object.entries(TIPO_RENDA).map(([k, v]) => `<option value="${k}" ${r.tipo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         ${r.tipo === 'horas'
-      ? `<label class="muted" style="font-size:12.5px;">Hora R$ <input type="number" step="0.01" data-field="valor_hora" value="${r.valor_hora || ''}" style="width:100px; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 10px;"></label>
-           <label class="muted" style="font-size:12.5px;">Horas <input type="number" data-field="horas_previstas" value="${r.horas_previstas || 168}" style="width:80px; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 10px;"></label>`
-      : `<label class="muted" style="font-size:12.5px;">Valor R$ <input type="number" step="0.01" data-field="valor_base" value="${r.valor_base || ''}" style="width:120px; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 10px;"></label>`}
+      ? `<label>Hora R$ <input type="number" step="0.01" data-field="valor_hora" value="${r.valor_hora ?? ''}"></label>
+         <label>Horas no mês <input type="number" data-field="horas_previstas" value="${r.horas_previstas || 168}"></label>`
+      : r.tipo === 'eventual' ? ''
+        : `<label>${r.tipo === 'variavel' ? 'Valor se não houver histórico' : 'Valor'} R$ <input type="number" step="0.01" data-field="valor_base" value="${r.valor_base ?? ''}"></label>`}
+        <label>Cai por volta do dia <input type="number" min="1" max="31" data-field="dia_pagamento" value="${r.dia_pagamento ?? ''}"></label>
       </div>
-      ${r.observacao ? `<div class="muted" style="font-size:11.5px; margin-top:8px;">${r.observacao}</div>` : ''}
-    </div>`).join('');
-  el.querySelectorAll('input').forEach(inp => {
+      <div class="renda-campos">
+        ${r.valor_exato != null
+      ? `<label>Reconhecer pelo valor exato R$ <input type="number" step="0.01" data-field="valor_exato" value="${r.valor_exato}"></label>`
+      : `<label>Reconhecer pelo texto do extrato <input data-field="padrao_regex" value="${esc(r.padrao_regex || '')}" placeholder="ex.: NOME DA EMPRESA"></label>`}
+        <label class="chk"><input type="checkbox" data-field="corte" ${r.competencia_corte ? 'checked' : ''}> cai no fim do mês e paga o mês seguinte</label>
+      </div>
+      <div class="muted renda-rodape">${r.tipo === 'eventual' ? 'Não entra na previsão' : 'Previsão por mês: ' + fmt(r.estimada || 0)}${r.observacao ? ' · ' + esc(r.observacao) : ''}</div>
+    </div>`).join('')
+    + `<button class="ghost btn-nova-renda" style="margin-top:4px;">${ico('plus')} Nova renda</button>
+       <div class="p-rendas-sug" style="margin-top:18px;"></div>`;
+
+  el.querySelectorAll('.renda-item [data-field]').forEach(inp => {
     inp.onchange = async e => {
-      const id = e.target.closest('.renda-item').dataset.id;
+      const item = e.target.closest('.renda-item');
+      const f = e.target.dataset.field;
       const body = {};
-      body[e.target.dataset.field] = e.target.value === '' ? null : parseFloat(e.target.value);
-      await api('/api/rendas/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      toast('Renda atualizada');
+      if (f === 'corte') body.competencia_corte = e.target.checked ? 20 : null;
+      else if (f === 'nome' || f === 'tipo' || f === 'padrao_regex') body[f] = e.target.value;
+      else body[f] = e.target.value === '' ? null : parseFloat(e.target.value);
+      try {
+        await jsonPost('/api/rendas/' + item.dataset.id, body, 'PUT');
+        toast('Renda atualizada');
+        if (f === 'tipo' || f === 'corte' || f === 'valor_base' || f === 'valor_hora' || f === 'horas_previstas' || f === 'padrao_regex' || f === 'valor_exato') renderRendasConfig(el);
+      } catch (err) { toast(err.message); }
     };
   });
+  el.querySelectorAll('.renda-x').forEach(b => {
+    b.onclick = async e => {
+      const item = e.target.closest('.renda-item');
+      if (!confirm('Remover esta renda? As transações continuam; ela só deixa de entrar nas contas do mês.')) return;
+      await api('/api/rendas/' + item.dataset.id, { method: 'DELETE' });
+      renderRendasConfig(el);
+    };
+  });
+  el.querySelector('.btn-nova-renda').onclick = () => novaRenda(() => renderRendasConfig(el));
+  renderSugestoesRenda(el.querySelector('.p-rendas-sug'), () => renderRendasConfig(el));
+}
+
+async function novaRenda(aoMudar) {
+  const nome = prompt('Nome da renda (ex.: Salário, Aluguel recebido):');
+  if (!nome) return;
+  const texto = prompt('Como ela aparece no extrato? Digite um pedaço do texto (ex.: o nome da empresa).\nSe ela vem cada vez com um texto diferente mas sempre com o mesmo valor, deixe em branco.');
+  const body = { nome, tipo: 'fixa' };
+  if (texto && texto.trim()) body.padrao_regex = texto.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  else {
+    const v = parseFloat(String(prompt('Valor exato que cai (ex.: 850,00):') || '').replace(/\./g, '').replace(',', '.'));
+    if (!isFinite(v) || v <= 0) return toast('Sem texto nem valor não dá para reconhecer a renda');
+    body.valor_exato = v; body.valor_base = v;
+  }
+  try { await jsonPost('/api/rendas', body); toast('Renda cadastrada — ajuste o tipo e o valor'); aoMudar(); }
+  catch (err) { toast(err.message); }
+}
+
+// entradas que se repetem no histórico: "é renda?" — aceitar cadastra com o que o histórico mostra
+async function renderSugestoesRenda(el, aoMudar) {
+  if (!el) return [];
+  const sug = await api('/api/rendas/sugestoes').catch(() => []);
+  if (!sug.length) { el.innerHTML = ''; return sug; }
+  el.innerHTML = `<h5 class="sug-titulo">Entradas que se repetem no seu histórico — são renda? Responda cada uma: só entra o que você confirmar.</h5>`
+    + sug.map((s, i) => `
+    <div class="renda-sug" data-i="${i}">
+      <div>
+        <b>${esc(s.nome)}</b>
+        <div class="muted" style="font-size:12.5px;">caiu em ${s.meses} meses · ${s.valor_min === s.valor_max ? fmt(s.valor_mediano) : `de ${fmt(s.valor_min)} a ${fmt(s.valor_max)}`} · por volta do dia ${s.dia_tipico}</div>
+      </div>
+      <div class="renda-sug-acoes">
+        <select class="fselect sug-tipo">${Object.entries(TIPO_RENDA).map(([k, v]) => `<option value="${k}" ${s.tipo_sugerido === k ? 'selected' : ''}>${v.split(' —')[0]}</option>`).join('')}</select>
+        <button class="ghost sug-sim">Sim, é renda</button>
+        <button class="ghost sug-nao">Não é</button>
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('.renda-sug').forEach(card => {
+    const s = sug[+card.dataset.i];
+    card.querySelector('.sug-sim').onclick = async () => {
+      const tipo = card.querySelector('.sug-tipo').value;
+      const body = {
+        nome: s.nome, tipo, padrao_regex: s.padrao_regex, valor_exato: s.valor_exato,
+        valor_base: tipo === 'variavel' ? s.media_mensal : s.valor_mediano,
+        dia_pagamento: s.dia_tipico, competencia_corte: s.competencia_corte
+      };
+      if (tipo === 'horas') { body.horas_previstas = 168; body.valor_hora = Math.round(s.valor_mediano / 168 * 100) / 100; }
+      try { await jsonPost('/api/rendas', body); toast('Renda cadastrada: ' + s.nome); aoMudar && aoMudar(); }
+      catch (err) { toast(err.message); }
+    };
+    card.querySelector('.sug-nao').onclick = async () => {
+      await jsonPost('/api/rendas/sugestoes/dispensar', { chave: s.chave });
+      card.remove();
+      if (!el.querySelector('.renda-sug')) el.innerHTML = '';
+    };
+  });
+  return sug;
 }
 
 // Gestão de Contas e Cartões (Configurar)
@@ -2518,7 +2508,7 @@ function renderContasConfig(contas) {
 
     const vinculoAuvp = c.conta_auvp 
       ? `<span title="Conta conectada via Open Finance" style="font-size:11px; color:var(--muted);">🔗 Open Finance (${c.conta_auvp})</span>`
-      : `<span style="font-size:11px; color:var(--muted);">📁 Importação Local (PDF)</span>`;
+      : `<span style="font-size:11px; color:var(--muted);">Sem vínculo com a AUVP</span>`;
 
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
@@ -2646,14 +2636,12 @@ if (document.getElementById('modal-conta-salvar')) {
 }
 
 async function loadConfigurar() {
-  loadImportar(); // histórico de PDFs (painel opcional)
+  renderAcessoConfig();
   // Contas e Cartões
   const todasContas = await api('/api/contas?todas=1').catch(() => []);
   renderContasConfig(todasContas);
 
-  // rendas (movedas da Projeção)
-  const proj = await api('/api/projecao').catch(() => ({}));
-  await renderRendasConfig(proj.rendas || []);
+  await renderRendasConfig();
   // AUVP
   const auvp = await api('/api/config/auvp').catch(() => ({}));
   document.getElementById('cfg-auvp-url').value = auvp.url || 'https://financas-api.auvp.com.br/mcp';
@@ -2741,4 +2729,401 @@ async function atualizarTopo() {
   if (f) f.textContent = 'Recorrências · Contas do mês · Projeção · Reconciliar';
 }
 // abre direto na Projeção (decisão de 15/10: só o core no menu)
-loadMeses().then(() => { loadProjecao(); atualizarTopo(); });
+// primeira inicialização: o assistente monta o painel antes; depois abre direto na Projeção
+abrirAssistente().then(aberto => { if (!aberto) loadMeses().then(() => { loadProjecao(); atualizarTopo(); }); });
+
+// ---------- primeira inicialização (assistente) ----------
+// passos: chave da AUVP e primeira sincronização → contas e cartões → rendas → só este PC ou casa toda
+const assist = {
+  el: () => document.getElementById('assistente'),
+  ir(n) {
+    const el = this.el();
+    el.querySelectorAll('section[data-passo]').forEach(s => { s.hidden = +s.dataset.passo !== n; });
+    el.querySelectorAll('.assist-passos li').forEach((li, i) => { li.className = i < n ? 'feito' : i === n ? 'atual' : ''; });
+    el.querySelector('.assist-caixa').scrollTop = 0;
+    this.passo = n;
+    if (n === 1) assistContas();
+    if (n === 2) renderRendasConfig(document.getElementById('as-rendas'));
+    if (n === 3) assistFixas();
+    if (n === 4) assistModo();
+  }
+};
+
+async function abrirAssistente() {
+  const est = await api('/api/setup/estado').catch(() => null);
+  if (!est || est.concluido) return false;
+  const el = assist.el();
+  el.hidden = false;
+  document.body.classList.add('sem-rolagem');
+  el.querySelectorAll('[data-voltar]').forEach(b => { b.onclick = () => assist.ir(assist.passo - 1); });
+  if (est.tem_chave) document.getElementById('as-chave').placeholder = '•••••••• (já salva — pode só clicar em conectar)';
+  document.getElementById('as-conectar').onclick = assistConectar;
+  document.getElementById('as-contas-ok').onclick = assistSalvarContas;
+  document.getElementById('as-rendas-ok').onclick = assistRendasOk;
+  document.getElementById('as-fixas-ok').onclick = assistFixasOk;
+  document.getElementById('as-concluir').onclick = assistConcluir;
+  assist.ir(0);
+  return true;
+}
+
+async function assistConectar() {
+  const chave = document.getElementById('as-chave').value.trim();
+  const out = document.getElementById('as-sync');
+  const botao = document.getElementById('as-conectar');
+  const est = await api('/api/setup/estado');
+  if (!chave && !est.tem_chave) { out.innerHTML = '<p class="assist-erro">Cole a chave do MCP da AUVP.</p>'; return; }
+  botao.disabled = true;
+  out.innerHTML = `<p class="muted">${ico('loading', 'gira')} Buscando suas contas, cartões e transações na AUVP… (pode levar alguns minutos; se a AUVP pedir uma pausa, o app espera e continua sozinho)</p>`;
+  try {
+    await jsonPost('/api/config/auvp', { key: chave || undefined, ativo: true });
+    const r = await api('/api/auvp/sync', { method: 'POST' });
+    const n = r.nucleo || {};
+    if (n.erro) throw new Error(n.erro);
+    const contas = await api('/api/contas?todas=1');
+    out.innerHTML = `<p class="assist-ok">${ico('check')} Conectado. Encontrei ${contas.filter(c => c.tipo === 'BANK').length} conta(s), ${contas.filter(c => c.tipo === 'CREDIT').length} cartão(ões) e ${n.transacoes_novas ?? 0} transação(ões).</p>`;
+    atualizarTopo();
+    setTimeout(() => assist.ir(1), 900);
+  } catch (err) {
+    const recusada = /401|Unauthorized|Credencial/i.test(err.message);
+    out.innerHTML = `<p class="assist-erro">${recusada ? 'A AUVP recusou essa chave.' : 'Não deu certo: ' + esc(err.message)}</p><p class="muted assist-nota">Confira se a chave foi copiada inteira e se a sua conta da AUVP está ativa.</p>`;
+  } finally { botao.disabled = false; }
+}
+
+async function assistContas() {
+  const contas = await api('/api/contas?todas=1').catch(() => []);
+  const el = document.getElementById('as-contas');
+  if (!contas.length) { el.innerHTML = '<p class="muted">Nenhuma conta chegou da AUVP. Conecte seus bancos lá e sincronize de novo em Configurar.</p>'; return; }
+  el.innerHTML = contas.map(c => `
+    <div class="assist-conta" data-id="${esc(c.id)}">
+      <span class="assist-conta-nome">${esc(c.icone || '')} <b>${esc(c.nome)}</b> <span class="muted">${c.tipo === 'CREDIT' ? 'cartão' : 'conta'}</span></span>
+      ${c.tipo === 'CREDIT' ? `
+        <label>Fecha dia <input type="number" min="1" max="31" data-f="dia_fechamento" value="${c.dia_fechamento ?? c.fecha_aprendido ?? ''}"></label>
+        <label>Vence dia <input type="number" min="1" max="31" data-f="dia_vencimento" value="${c.dia_vencimento ?? c.vence_aprendido ?? ''}"></label>` : ''}
+    </div>`).join('');
+}
+
+async function assistSalvarContas() {
+  const faltando = [];
+  for (const linha of document.querySelectorAll('#as-contas .assist-conta')) {
+    const ins = linha.querySelectorAll('input');
+    if (!ins.length) continue;
+    const [f, v] = [...ins].map(i => parseInt(i.value));
+    if (!(f >= 1 && f <= 31 && v >= 1 && v <= 31)) { faltando.push(linha.querySelector('b').textContent); continue; }
+    await jsonPost('/api/contas/' + encodeURIComponent(linha.dataset.id), { dia_fechamento: f, dia_vencimento: v }, 'PUT');
+  }
+  if (faltando.length) return toast('Preencha fechamento e vencimento de: ' + faltando.join(', '));
+  assist.ir(2);
+}
+
+async function assistModo() {
+  const info = await api('/api/acesso/info').catch(() => ({}));
+  const marcar = m => document.querySelectorAll('.assist-opcao').forEach(b => b.classList.toggle('sel', b.dataset.modo === m));
+  marcar(info.modo);
+  mostrarEnderecos(document.getElementById('as-modo'), info);
+  document.querySelectorAll('.assist-opcao').forEach(b => {
+    b.onclick = async () => {
+      if (info.fixo) return toast('O endereço foi fixado na instalação (Docker): mude por lá');
+      marcar(b.dataset.modo);
+      const r = await jsonPost('/api/acesso/modo', { modo: b.dataset.modo }).catch(err => { toast(err.message); return null; });
+      if (r) mostrarEnderecos(document.getElementById('as-modo'), r);
+    };
+  });
+}
+
+// endereço para abrir no celular, quando o app está aberto para a casa toda
+function mostrarEnderecos(el, info) {
+  if (!el) return;
+  if (info.modo !== 'casa') { el.innerHTML = ''; return; }
+  el.innerHTML = info.enderecos && info.enderecos.length
+    ? `<p>No celular ou em outro computador da casa, conectado ao mesmo Wi-Fi, abra:</p>
+       ${info.enderecos.map(u => `<div class="assist-endereco mono">${esc(u)}</div>`).join('')}
+       <p class="muted assist-nota">No Windows, se aparecer o aviso do firewall pedindo para liberar o Node.js, marque <b>Redes privadas</b> e permita. Se o endereço mudar depois de reiniciar o roteador, ele aparece de novo em Configurar.</p>`
+    : info.fixo
+      ? `<p class="muted">Abra pelo IP do computador onde o Docker roda, na porta publicada (ex.: http://192.168.0.10:4321). Para mostrar o endereço aqui, defina FINANCA_ENDERECO no .env.</p>`
+      : '<p class="muted">Não achei este computador em nenhuma rede. Conecte-o ao Wi-Fi ou ao cabo de casa e veja o endereço em Configurar.</p>';
+}
+
+async function assistConcluir() {
+  await jsonPost('/api/setup/concluir', {});
+  assist.el().hidden = true;
+  document.body.classList.remove('sem-rolagem');
+  toast('Pronto! Seu painel está montado');
+  await loadMeses();
+  loadProjecao();
+  atualizarTopo();
+}
+
+// Configurar → Acesso: onde o app abre, endereço para o celular, senha e sair
+async function renderAcessoConfig() {
+  const info = await api('/api/acesso/info').catch(() => null);
+  if (!info) return;
+  document.getElementById('cfg-acesso').innerHTML = `<p class="muted" style="font-size:13px;">Entrou como <b>${esc(info.usuario)}</b>.${info.fixo ? ' O endereço foi fixado na instalação (Docker).' : ''}</p>`;
+  const marcar = m => document.querySelectorAll('[data-modo-cfg]').forEach(b => b.classList.toggle('sel', b.dataset.modoCfg === m));
+  marcar(info.modo);
+  mostrarEnderecos(document.getElementById('cfg-acesso-enderecos'), info);
+  document.querySelectorAll('[data-modo-cfg]').forEach(b => {
+    b.onclick = async () => {
+      if (info.fixo) return toast('O endereço foi fixado na instalação (Docker): mude por lá');
+      if (b.dataset.modoCfg === 'pc' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+        && !confirm('Você está em outro aparelho. Depois disso o app só abre no computador onde ele roda. Continuar?')) return;
+      const r = await jsonPost('/api/acesso/modo', { modo: b.dataset.modoCfg }).catch(err => { toast(err.message); return null; });
+      if (r) { marcar(r.modo); mostrarEnderecos(document.getElementById('cfg-acesso-enderecos'), r); toast(r.modo === 'casa' ? 'Aberto para a casa toda' : 'Só neste computador'); }
+    };
+  });
+  document.getElementById('cfg-trocar-senha').onclick = async () => {
+    const atual = prompt('Senha atual:'); if (!atual) return;
+    const nova = prompt('Nova senha (pelo menos 6 caracteres):'); if (!nova) return;
+    if (prompt('Repita a nova senha:') !== nova) return toast('As senhas não são iguais');
+    try { await jsonPost('/api/acesso/senha', { atual, nova }); toast('Senha trocada'); } catch (err) { toast(err.message); }
+  };
+  document.getElementById('cfg-sair').onclick = async () => { await jsonPost('/api/acesso/sair', {}); location.href = '/entrar.html'; };
+}
+
+// rendas: sugestão sem resposta não pode passar batida
+async function assistRendasOk() {
+  const pend = [...document.querySelectorAll('#as-rendas .renda-sug')];
+  if (pend.length) {
+    const nomes = pend.map(c => '• ' + c.querySelector('b').textContent).join('\n');
+    if (!confirm(`Estas entradas ficaram sem resposta:\n${nomes}\n\nOK cadastra todas como renda (com o tipo escolhido em cada uma). Cancelar volta para você responder uma a uma.`)) return;
+    for (const c of pend) await c.querySelector('.sug-sim').onclick();
+    await new Promise(r => setTimeout(r, 300));
+  }
+  const rendas = await api('/api/rendas').catch(() => []);
+  if (!rendas.length && !confirm('Nenhuma renda cadastrada. Sem renda o app não calcula quanto sobra. Continuar mesmo assim? (dá para cadastrar depois em Configurar)')) return;
+  assist.ir(3);
+}
+
+// ---------- contas fixas e dívidas (assistente e aba Recorrentes) ----------
+// pagamentos da conta que se repetem: "é conta fixa?" — aceitar cria a recorrência e a conta deste mês
+async function renderSugestoesFixas(el, aoMudar) {
+  if (!el) return [];
+  const sug = await api('/api/contas-fixas/sugestoes').catch(() => []);
+  if (!sug.length) { el.innerHTML = '<p class="muted" style="font-size:13px;">Nenhum pagamento repetido sem resposta no seu histórico.</p>'; return sug; }
+  el.innerHTML = `<h5 class="sug-titulo">Pagamentos que se repetem todo mês — são contas fixas ou dívidas? Responda cada uma: só entra o que você confirmar.</h5>`
+    + sug.map((s, i) => `
+    <div class="renda-sug fixa-sug" data-i="${i}">
+      <div style="flex:1 1 260px; min-width:0;">
+        <input class="renda-nome fixa-nome" value="${esc(s.nome)}" title="Nome da conta (pode mudar)">
+        <div class="muted" style="font-size:12.5px;">${s.meses} meses · ${s.valor_min === s.valor_max ? fmt(s.valor) : `de ${fmt(s.valor_min)} a ${fmt(s.valor_max)}`} · por volta do dia ${s.dia_tipico}${s.pago_este_mes ? ' · já paga este mês' : ''}</div>
+      </div>
+      <div class="renda-sug-acoes">
+        <select class="fselect fixa-tipo">
+          <option value="Recorrente">Conta fixa (todo mês)</option>
+          <option value="Parcelado">Dívida parcelada</option>
+        </select>
+        <span class="fixa-parc" hidden><input type="number" min="1" class="fixa-atual" placeholder="parc." title="Parcela deste mês"> de <input type="number" min="1" class="fixa-total" placeholder="total" title="Total de parcelas"></span>
+        <button class="ghost sug-sim">Sim, é fixa</button>
+        <button class="ghost sug-nao">Não é</button>
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('.fixa-sug').forEach(card => {
+    const s = sug[+card.dataset.i];
+    const tipo = card.querySelector('.fixa-tipo');
+    tipo.onchange = () => { card.querySelector('.fixa-parc').hidden = tipo.value !== 'Parcelado'; };
+    card.querySelector('.sug-sim').onclick = async () => {
+      const body = {
+        descricao: card.querySelector('.fixa-nome').value.trim() || s.nome, valor: s.valor, dia_venc: s.dia_tipico,
+        categoria: s.categoria, padrao_busca: s.padrao_busca, tipo: tipo.value,
+        parcela_atual: card.querySelector('.fixa-atual').value, total_parcelas: card.querySelector('.fixa-total').value
+      };
+      try {
+        const r = await jsonPost('/api/contas-fixas', body);
+        toast(`Conta fixa cadastrada: ${body.descricao}${r.conciliados ? ' (pagamento deste mês já ligado)' : ''}`);
+        aoMudar && aoMudar();
+      } catch (err) { toast(err.message); throw err; }
+    };
+    card.querySelector('.sug-nao').onclick = async () => {
+      await jsonPost('/api/contas-fixas/dispensar', { chave: s.chave });
+      card.remove();
+      if (!el.querySelector('.fixa-sug')) aoMudar && aoMudar();
+    };
+  });
+  return sug;
+}
+
+// conta fixa ou dívida que não apareceu no histórico (ex.: começou agora, ou paga em dinheiro)
+async function novaContaFixa(aoMudar) {
+  const descricao = prompt('Nome da conta ou dívida (ex.: Escola, Financiamento do carro):');
+  if (!descricao) return;
+  const valor = parseFloat(String(prompt('Valor por mês (ex.: 450,00):') || '').replace(/\./g, '').replace(',', '.'));
+  if (!isFinite(valor) || valor <= 0) return toast('Valor inválido');
+  const dia = parseInt(prompt('Dia do vencimento (1 a 31):') || '');
+  const parc = (prompt('É parcelada? Digite "parcela atual de total" (ex.: 3 de 12) ou deixe em branco se é todo mês:') || '').match(/(\d+)\D+(\d+)/);
+  const body = { descricao, valor, dia_venc: dia || 5, tipo: parc ? 'Parcelado' : 'Recorrente', parcela_atual: parc ? parc[1] : null, total_parcelas: parc ? parc[2] : null };
+  try { await jsonPost('/api/contas-fixas', body); toast('Cadastrada: ' + descricao); aoMudar && aoMudar(); }
+  catch (err) { toast(err.message); }
+}
+
+// passo do assistente: o que já está cadastrado + sugestões
+async function assistFixas() {
+  const el = document.getElementById('as-fixas');
+  const recs = await api('/api/recorrentes').catch(() => []);
+  const ativas = recs.filter(r => r.ativo);
+  el.innerHTML = (ativas.length ? `<div class="assist-cadastradas"><b>Já cadastradas (${ativas.length}):</b> ${ativas.map(r => `${esc(r.descricao)} ${fmt(r.valor || 0)}${r.tipo === 'Parcelado' ? ` (${r.total_parcelas}x)` : ''}`).join(' · ')}</div>` : '')
+    + '<div id="as-fixas-sug"></div>'
+    + `<button class="ghost" id="as-fixa-nova" style="margin-top:8px;">${ico('plus')} Outra conta fixa ou dívida</button>`;
+  document.getElementById('as-fixa-nova').onclick = () => novaContaFixa(assistFixas);
+  await renderSugestoesFixas(document.getElementById('as-fixas-sug'), assistFixas);
+}
+
+// a trava: sugestão sem resposta não passa batida
+async function assistFixasOk() {
+  const pend = [...document.querySelectorAll('#as-fixas .fixa-sug')];
+  if (pend.length) {
+    const nomes = pend.map(c => '• ' + c.querySelector('.fixa-nome').value).join('\n');
+    if (!confirm(`Estes pagamentos ficaram sem resposta:\n${nomes}\n\nOK cadastra todos como conta fixa. Cancelar volta para você responder um a um (o que não for conta, marque "Não é").`)) return;
+    for (const c of pend) { try { await c.querySelector('.sug-sim').onclick(); } catch (e) { return; } }
+  }
+  assist.ir(4);
+}
+
+// aba Recorrentes: as mesmas sugestões, para quem pulou ou para pagamentos novos
+async function renderFixasRecorrentes() {
+  const el = document.getElementById('rec-sugestoes');
+  if (!el) return;
+  const sug = await renderSugestoesFixas(el, () => loadRecorrentes());
+  el.closest('.panel').hidden = !sug.length;
+}
+
+// ---------- janela da conta do mês: pagamento em cima, detalhes embaixo ----------
+const DIAS_SEM = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const dataCurta = iso => { if (!iso) return ''; const d = new Date(iso + 'T12:00:00'); return `${DIAS_SEM[d.getDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}`; };
+const ondeFoi = fonte => (fonte === 'auvp-mcp' ? 'cartão' : fonte === 'manual' ? 'manual' : 'conta');
+
+async function abrirConta(id, aoMudar, opts = {}) {
+  const depois = () => { (aoMudar || loadMes)(); };
+  let l;
+  try { l = await api('/api/lancamentos/' + id); } catch (e) { return toast(e.message); }
+  const cats = await api('/api/categorias').catch(() => []);
+  const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const st = l.pago ? 'pago' : (l.vencimento < hoje ? 'vencido' : 'aberto');
+  const tipo = l.tipo_gasto === 'fatura' ? ['cartão', 'tp-fatura'] : l.tipo_gasto === 'parcela' ? ['parcela', 'tp-parcela'] : ['fixo', 'tp-fixo'];
+
+  const modal = document.createElement('dialog');
+  modal.className = 'dlg-conta';
+  modal.innerHTML = `
+    <div class="dc-topo">
+      <div class="dc-titulo">
+        <h3>${esc(l.descricao)} ${l.parcela ? `<span class="muted">${esc(l.parcela)}</span>` : ''}</h3>
+        <div class="dc-sub">
+          <span class="badge ${st}">${st.toUpperCase()}</span>
+          <span class="tipo-badge ${tipo[1]}">${tipo[0]}</span>
+          <span class="mono dc-valor">${fmt(l.valor)}</span>
+          <span class="muted">vence ${dataCurta(l.vencimento)}</span>
+        </div>
+      </div>
+      <button class="ghost dc-x" title="Fechar">${ico('x')}</button>
+    </div>
+    <section class="dc-pag"></section>
+    <details class="dc-det" ${opts.editar ? 'open' : ''}>
+      <summary>Editar detalhes da conta</summary>
+      <form class="dc-form">
+        <label class="dc-full">Nome<input name="descricao" value="${esc(l.descricao)}" required></label>
+        <label>Valor (R$)<input name="valor" type="number" step="0.01" value="${l.valor}" required></label>
+        <label>Vencimento<input name="vencimento" type="date" value="${l.vencimento}" required></label>
+        <label>Categoria<select name="categoria"><option value="">—</option>${cats.map(c => `<option ${c.nome === l.categoria ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label>
+        <label>Parcela<input name="parcela" value="${esc(l.parcela || '')}" placeholder="ex.: 2/12"></label>
+        <label class="dc-full">Observação<input name="observacao" value="${esc(l.observacao || '')}" placeholder="opcional"></label>
+        <div class="dc-full dc-form-acoes"><button class="cta" type="submit">Salvar alterações</button></div>
+      </form>
+    </details>
+    <div class="dc-rodape">
+      <button class="ghost dc-excluir">${ico('trash')} Excluir conta</button>
+      <button class="ghost dc-fechar">Fechar</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.showModal();
+  const fechar = () => { modal.close(); modal.remove(); };
+  modal.addEventListener('close', () => modal.remove());
+  modal.querySelector('.dc-x').onclick = fechar;
+  modal.querySelector('.dc-fechar').onclick = fechar;
+  modal.addEventListener('click', e => { if (e.target === modal) fechar(); }); // clique fora fecha
+
+  const pag = modal.querySelector('.dc-pag');
+  const put = body => api('/api/lancamentos/' + l.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  // conta paga: mostra com o quê; dá para trocar ou desfazer
+  function mostrarPago() {
+    pag.innerHTML = l.transacao_id ? `
+      <div class="dc-pago">
+        <div class="dc-pago-ic">${ico('check')}</div>
+        <div class="dc-pago-txt">
+          <b>Paga ${dataCurta(l.transacao_data || l.pago_em)}</b>
+          <span>${esc(l.transacao_desc || '')}</span>
+          <span class="muted">${fmt(Math.abs(l.transacao_valor || l.valor))} · saiu da ${ondeFoi(l.transacao_fonte)}</span>
+        </div>
+      </div>
+      <div class="dc-acoes"><button class="ghost dc-trocar">Trocar pagamento</button><button class="ghost dc-desfazer">Desfazer: voltar para em aberto</button></div>`
+      : `
+      <div class="dc-pago sem">
+        <div class="dc-pago-ic">${ico('check')}</div>
+        <div class="dc-pago-txt"><b>Marcada como paga${l.pago_em ? ' ' + dataCurta(l.pago_em) : ''}</b><span class="muted">sem um pagamento do extrato ligado</span></div>
+      </div>
+      <div class="dc-acoes"><button class="ghost dc-trocar">Ligar a um pagamento do extrato</button><button class="ghost dc-desfazer">Desfazer: voltar para em aberto</button></div>`;
+    pag.querySelector('.dc-trocar').onclick = () => escolherPagamento(true);
+    pag.querySelector('.dc-desfazer').onclick = async () => {
+      await put({ pago: false, transacao_id: null });
+      toast('Conta voltou para em aberto'); fechar(); depois();
+    };
+  }
+
+  // conta em aberto (ou trocando): qual pagamento quitou?
+  async function escolherPagamento(trocando) {
+    pag.innerHTML = `
+      <h4 class="dc-h">${trocando ? 'Escolha o pagamento certo' : 'Já pagou? Escolha o pagamento que quitou esta conta'}</h4>
+      <input type="search" class="fselect dc-busca" placeholder="buscar outro pagamento no extrato…">
+      <div class="dc-lista"></div>
+      <div class="dc-acoes">
+        ${trocando ? '<button class="ghost dc-voltar">Cancelar troca</button>' : ''}
+        <button class="ghost dc-sem">Paguei por fora (dinheiro, outro app) — marcar como paga</button>
+      </div>`;
+    const lista = pag.querySelector('.dc-lista');
+    async function carregar(busca) {
+      lista.innerHTML = '<div class="muted dc-vazio">carregando…</div>';
+      const itens = await api(`/api/lancamentos/${l.id}/candidatos?busca=${encodeURIComponent(busca || '')}`).catch(() => []);
+      if (!itens.length) { lista.innerHTML = `<div class="muted dc-vazio">Nenhum pagamento ${busca ? `com "${esc(busca)}"` : 'da conta corrente perto do vencimento'}.</div>`; return; }
+      lista.innerHTML = itens.map((t, i) => {
+        const dif = t.dif_valor;
+        const chip = Math.abs(dif) < 0.01 ? '<span class="dc-chip ok">valor exato</span>'
+          : `<span class="dc-chip">${dif > 0 ? '+' : '−'}${fmt(Math.abs(dif))}</span>`;
+        const prov = !busca && i === 0 && t.nivel === 'certo' ? '<span class="dc-prov">mais provável</span>' : '';
+        return `<button class="dc-item ${prov ? 'prov' : ''}" data-id="${t.id}">
+          <span class="dc-item-desc">${prov}${esc(t.descricao)}</span>
+          <span class="dc-item-meta">${dataCurta(t.data)} · ${ondeFoi(t.fonte)}</span>
+          <span class="dc-item-val mono">${fmt(Math.abs(t.valor))}</span>${chip}
+        </button>`;
+      }).join('');
+      lista.querySelectorAll('.dc-item').forEach(b => {
+        b.onclick = async () => {
+          const r = await api('/api/contas-mes-reconciliar/anexar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lancamento_id: l.id, transacao_id: Number(b.dataset.id) }) }).catch(e => ({ erro: e.message }));
+          if (r.erro) return toast(r.erro);
+          toast(r.valorAtualizado ? 'Paga — valor da conta ajustado para o que saiu' : 'Paga');
+          fechar(); depois();
+        };
+      });
+    }
+    let t0;
+    pag.querySelector('.dc-busca').oninput = e => { clearTimeout(t0); t0 = setTimeout(() => carregar(e.target.value), 250); };
+    pag.querySelector('.dc-sem').onclick = async () => { await put({ pago: true }); toast('Marcada como paga'); fechar(); depois(); };
+    const v = pag.querySelector('.dc-voltar');
+    if (v) v.onclick = mostrarPago;
+    await carregar('');
+  }
+
+  modal.querySelector('.dc-form').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    await put({
+      descricao: f.descricao.value.trim(), valor: parseFloat(f.valor.value), vencimento: f.vencimento.value,
+      categoria: f.categoria.value || null, parcela: f.parcela.value.trim() || null, observacao: f.observacao.value.trim() || null
+    });
+    toast('Conta salva'); fechar(); depois();
+  };
+  modal.querySelector('.dc-excluir').onclick = async () => {
+    if (!confirm(`Excluir "${l.descricao}" deste mês? A recorrente (se houver) continua gerando os próximos meses.`)) return;
+    await api('/api/lancamentos/' + l.id, { method: 'DELETE' });
+    toast('Conta excluída'); fechar(); depois();
+  };
+
+  if (l.pago) mostrarPago(); else await escolherPagamento(false);
+}

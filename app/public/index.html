@@ -20,15 +20,17 @@
 
 <div class="layout">
   <aside class="sidebar">
-    <div class="nav-item" data-view="visao">◎ Hoje</div>
-    <div class="nav-item active" data-view="projecao">◉ Projeção</div>
+    <!-- no celular vira barra de baixo: os quatro principais + "Mais" (os .extra abrem por cima da barra) -->
+    <div class="nav-item" data-view="visao"><i>◎</i><span>Hoje</span></div>
+    <div class="nav-item active" data-view="projecao"><i>◉</i><span>Projeção</span></div>
     <div class="section">OPERAÇÃO</div>
-    <div class="nav-item" data-view="mes">☐ Contas do mês</div>
-    <div class="nav-item" data-view="recorrentes">⏱ Recorrentes</div>
+    <div class="nav-item" data-view="mes"><i>☐</i><span>Contas do mês</span><span class="curto">Contas</span></div>
+    <div class="nav-item extra" data-view="recorrentes"><i>⏱</i><span>Recorrentes</span></div>
     <div class="section">DADOS</div>
-    <div class="nav-item" data-view="reconciliar">🔄 Reconciliar</div>
-    <div class="nav-item" data-view="extratos">▤ Transações</div>
-    <div class="nav-item" data-view="configurar">⚙ Configurar</div>
+    <div class="nav-item extra" data-view="reconciliar"><i>⇄</i><span>Reconciliar</span></div>
+    <div class="nav-item" data-view="extratos"><i>▤</i><span>Transações</span></div>
+    <div class="nav-item extra" data-view="configurar"><i>⚙</i><span>Configurar</span></div>
+    <div class="nav-item nav-mais" id="nav-mais"><i>⋯</i><span>Mais</span></div>
   </aside>
 
   <main class="content">
@@ -83,7 +85,7 @@
       </div>
 
       <!-- 2. Barra Unificada de Filtros e Recortes (Sticky) -->
-      <div class="panel" style="padding:14px 18px; position:sticky; top:60px; z-index:40; margin-bottom:12px;">
+      <div class="panel ext-filtros" style="padding:14px 18px; position:sticky; top:60px; z-index:40; margin-bottom:12px;">
         <!-- Linha 1: Período Inteligente -->
         <div class="filters" id="per-bar-extratos" style="margin-bottom:10px;">
           <span class="muted" style="font-weight:600; font-size:12px;">Período:</span>
@@ -394,6 +396,10 @@
         <span class="muted" id="rec-resumo" style="font-size:12.5px;"></span>
         <span class="muted" id="rec-gerar-status" style="font-size:12.5px;"></span>
       </div>
+      <div class="panel" hidden>
+        <h4>CONTAS FIXAS ENCONTRADAS NO SEU HISTÓRICO</h4>
+        <div id="rec-sugestoes"></div>
+      </div>
       <div class="panel">
         <table id="tbl-rec">
           <thead>
@@ -491,20 +497,20 @@
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
             <div>
               <h4 style="margin:0;">MINHAS CONTAS E CARTÕES (OPEN FINANCE & BANCOS)</h4>
-              <p class="muted" style="margin:4px 0 0; font-size:13px;">Gerencie suas contas e cartões sincronizados via AUVP ou importados. Configure o dia de fechamento e vencimento de cada cartão para o cálculo preciso das faturas abertas.</p>
+              <p class="muted" style="margin:4px 0 0; font-size:13px;">Contas e cartões chegam sozinhos da AUVP. Configure o dia de fechamento e vencimento de cada cartão para o cálculo preciso das faturas abertas.</p>
             </div>
             <button class="cta" id="btn-nova-conta" style="padding:6px 14px; font-size:13px;">+ Nova Conta / Cartão</button>
           </div>
           <div id="p-contas-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:14px; margin-top:14px;"></div>
         </div>
         <div class="panel">
-          <h4>MINHAS RENDAS <span class="muted" style="font-size:12px; text-transform:none; letter-spacing:0">base da projeção — editável</span></h4>
+          <h4>MINHAS RENDAS <span class="muted" style="font-size:12px; text-transform:none; letter-spacing:0">base da projeção</span></h4>
           <div id="p-rendas"></div>
-          <p class="muted" style="font-size:11px; margin-top:10px;">Defina suas fontes de renda líquida para o cálculo automático das projeções mensais.</p>
+          <p class="muted" style="font-size:11px; margin-top:10px;">Cada renda é reconhecida no extrato pelo texto ou pelo valor exato. Fixa e por hora usam o valor que você informa; variável usa a média dos últimos 3 meses; eventual só conta quando cai.</p>
         </div>
         <div class="panel">
           <h4>AUVP FINANCEIRO (open banking)</h4>
-          <p class="muted" style="margin-bottom:16px;">Fonte de dados via open banking: sincroniza TODAS as suas contas conectadas (Itaú, Nubank, gold, BTG...), com saldos, transações e parcelas futuras agendadas.</p>
+          <p class="muted" style="margin-bottom:16px;">Fonte dos dados, via open finance: sincroniza todas as contas e cartões que você conectou na AUVP, com saldos, transações e parcelas futuras.</p>
           <label style="display:block; margin-bottom:14px; font-size:13px; color:var(--muted);">API URL
             <input id="cfg-auvp-url" class="fselect" style="width:100%; margin-top:5px;" placeholder="https://financas-api.auvp.com.br/mcp">
           </label>
@@ -525,15 +531,16 @@
           <div id="auvp-sync-result" style="margin-top:14px;"></div>
         </div>
         <div class="panel">
-          <h4>IMPORTAR PDF (OPCIONAL)</h4>
-          <p class="muted" style="margin-bottom:16px;">O dia a dia vem da AUVP. Use PDF de fatura (Nubank, Itaú, Mercado Pago) ou extrato (Itaú) só para trazer um período que a AUVP não tem. O que a AUVP já trouxe não entra de novo.</p>
-          <label class="cta" style="display:inline-block; cursor:pointer;">
-            Selecionar PDFs
-            <input type="file" id="file-pdf" accept=".pdf" multiple hidden>
-          </label>
-          <div id="import-log" style="margin-top:16px; font-family:'IBM Plex Mono'; font-size:12px; color:var(--muted);"></div>
-          <div class="tabela-rolavel" style="margin-top:12px;">
-            <table><thead><tr><th>Data</th><th>Arquivo</th><th>Tipo</th><th>Linhas</th></tr></thead><tbody id="imp-hist"></tbody></table>
+          <h4>ACESSO</h4>
+          <div id="cfg-acesso"></div>
+          <div class="assist-opcoes" style="margin-top:12px;">
+            <button class="assist-opcao" data-modo-cfg="pc"><b>Só neste computador</b><span class="muted">Ninguém da rede acessa.</span></button>
+            <button class="assist-opcao" data-modo-cfg="casa"><b>Na casa toda</b><span class="muted">Celular e outros aparelhos do mesmo Wi-Fi, com usuário e senha.</span></button>
+          </div>
+          <div id="cfg-acesso-enderecos" class="assist-resultado"></div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+            <button class="ghost" id="cfg-trocar-senha">Trocar senha</button>
+            <button class="ghost" id="cfg-sair">Sair</button>
           </div>
         </div>
       </div>
@@ -550,7 +557,7 @@
     <input type="hidden" id="modal-conta-id">
     
     <label style="display:block; margin-bottom:12px; font-size:13px; color:var(--muted);">Nome da Conta ou Cartão
-      <input id="modal-conta-nome" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: Cartão BTG Black">
+      <input id="modal-conta-nome" class="fselect" style="width:100%; margin-top:5px;" placeholder="Ex: Cartão do banco X">
     </label>
 
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:12px;">
@@ -595,6 +602,94 @@
   </div>
 </div>
 
+<!-- primeira inicialização: aparece até a pessoa concluir (app.js → abrirAssistente) -->
+<div id="assistente" class="assist" hidden>
+  <div class="assist-caixa">
+    <ol class="assist-passos"><li>AUVP</li><li>Bancos</li><li>Rendas</li><li>Contas fixas</li><li>Onde usar</li></ol>
+
+    <section data-passo="0">
+      <h2>Vamos montar o seu painel</h2>
+      <p>O Leftover Finance mostra quanto do seu dinheiro já está comprometido (faturas, parcelas, contas fixas) e quanto sobra de verdade, mês a mês.</p>
+      <p>Ele não pede senha de banco. Os dados chegam pela <b>AUVP</b>: você conecta seus bancos e cartões lá, pelo open finance, e este app lê esses dados pelo <b>MCP da AUVP</b>. A leitura é só de consulta: daqui não sai nenhum pagamento nem transferência.</p>
+      <ol class="assist-lista">
+        <li>Na sua conta da AUVP, confira se os bancos e cartões que você usa estão conectados.</li>
+        <li>Gere a chave de acesso do MCP (ela começa com <code>auvp_</code>) e cole aqui embaixo.</li>
+      </ol>
+      <label class="assist-campo">Chave do MCP da AUVP
+        <input id="as-chave" type="password" autocomplete="off" placeholder="auvp_...">
+      </label>
+      <p class="muted assist-nota">A chave fica no cofre do sistema deste computador (no Windows, protegida pela sua conta de usuário). Ela não vai para o banco de dados do app.</p>
+      <div class="assist-acoes">
+        <button class="cta" id="as-conectar">Conectar e buscar meus dados</button>
+      </div>
+      <div id="as-sync" class="assist-resultado"></div>
+    </section>
+
+    <section data-passo="1" hidden>
+      <h2>Suas contas e cartões</h2>
+      <p>Estas chegaram da AUVP. Nos cartões, o dia de fechamento e o de vencimento foram calculados pelas faturas que já vieram e podem errar por um ou dois dias. Confira no app do banco e corrija aqui: é com eles que o app sabe em qual fatura cai cada compra.</p>
+      <div id="as-contas"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-contas-ok">Está certo, continuar</button>
+      </div>
+    </section>
+
+    <section data-passo="2" hidden>
+      <h2>Suas rendas</h2>
+      <p>Renda é o que entra todo mês e paga as contas: salário, pró-labore, aluguel recebido. Separei as entradas que se repetem no seu histórico; diga quais são renda e de que tipo:</p>
+      <ul class="assist-lista muted">
+        <li><b>Fixa</b>: o mesmo valor todo mês.</li>
+        <li><b>Por hora</b>: valor da hora × horas do mês.</li>
+        <li><b>Variável</b>: muda todo mês; o app usa a média dos últimos 3 meses.</li>
+        <li><b>Eventual</b>: só conta no mês em que cair.</li>
+      </ul>
+      <div id="as-rendas"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-rendas-ok">Continuar</button>
+      </div>
+    </section>
+
+    <section data-passo="3" hidden>
+      <h2>Contas fixas e dívidas</h2>
+      <p>O app divide o seu mês em três partes:</p>
+      <ul class="assist-lista">
+        <li><b>Faturas de cartão</b>: vêm sozinhas da AUVP. Compra no cartão não se cadastra aqui.</li>
+        <li><b>Contas fixas e dívidas</b>: aluguel, condomínio, luz, internet, escola, financiamento, empréstimo. Você cadastra <b>uma vez</b>.</li>
+        <li><b>Dia a dia</b>: todo o resto que sai da conta (PIX, débito).</li>
+      </ul>
+      <div class="assist-aviso">
+        <b>Como funciona:</b> cada conta fixa vira uma <b>recorrente</b>. Quando o mês acabar, em <b>Recorrentes → Gerar próximo mês</b>, o app cria as contas do mês seguinte a partir delas; a dívida parcelada para sozinha na última parcela.
+        <br><br><b>Neste mês</b>, cadastre tudo o que é fixo ou dívida: o que você já pagou e o que ainda vai pagar. O que já foi pago é ligado ao pagamento automaticamente e sai do "dia a dia"; o que falta pagar entra no comprometido do mês.
+      </div>
+      <div id="as-fixas"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-fixas-ok">Continuar</button>
+      </div>
+    </section>
+
+    <section data-passo="4" hidden>
+      <h2>Onde você vai usar?</h2>
+      <div class="assist-opcoes">
+        <button class="assist-opcao" data-modo="pc">
+          <b>Só neste computador</b>
+          <span class="muted">O app abre só aqui. Ninguém da rede consegue acessar.</span>
+        </button>
+        <button class="assist-opcao" data-modo="casa">
+          <b>Na casa toda</b>
+          <span class="muted">Abre também no celular e em outros computadores conectados ao mesmo Wi-Fi, com o seu usuário e senha. Este computador precisa estar ligado e com o app aberto.</span>
+        </button>
+      </div>
+      <div id="as-modo" class="assist-resultado"></div>
+      <div class="assist-acoes">
+        <button class="ghost" data-voltar>Voltar</button>
+        <button class="cta" id="as-concluir">Concluir</button>
+      </div>
+    </section>
+  </div>
+</div>
 <div id="toast"></div>
 <script src="/chart.umd.js"></script>
 <script src="/app.js"></script>

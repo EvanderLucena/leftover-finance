@@ -51,7 +51,7 @@ function padraoConfirmado(descricao) {
 // - "sugerido": identidade com valor mais distante (até 50%), ou valor idêntico sem identidade
 //   (ex.: um PIX genérico de valor exato no dia do vencimento); só vira pago quando você confirma
 const JANELA_ANTES = 15, JANELA_DEPOIS = 10;
-const FONTES_CARTAO = ['auvp-mcp', 'itau-fatura', 'nubank', 'mercadopago'];
+const { fontesCartao } = require('../core/fontes');
 const r2 = v => Math.round(v * 100) / 100;
 const hojeISO = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
 const dias = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 864e5);
@@ -89,6 +89,7 @@ function paresCandidatos({ mesId = null, hoje = hojeISO() } = {}) {
     LEFT JOIN recorrencias r ON r.id = l.recorrencia_id
     WHERE l.pago = 0 AND COALESCE(c.nome, '') != 'Cartões' AND l.vencimento <= date(?, '+${JANELA_ANTES} days')
     ${mesId ? 'AND l.mes_id = ?' : ''} ORDER BY l.vencimento`).all(...(mesId ? [hoje, mesId] : [hoje]));
+  const FONTES_CARTAO = fontesCartao();
   const txs = db.prepare(`SELECT id, data, valor, descricao, fonte FROM transacoes
     WHERE natureza = 'gasto' AND valor < 0 AND data <= ? AND data >= date(?, '-60 days')
     AND fonte NOT IN (${FONTES_CARTAO.map(() => '?').join(',')})

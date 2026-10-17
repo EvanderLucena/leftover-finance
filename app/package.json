@@ -7,17 +7,11 @@
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "import": "node scripts/import.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "nova-senha": "node scripts/nova-senha.js"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
-    "express": "^4.19.2",
-    "pdf-parse": "^2.4.5",
-    "pdfreader": "^3.0.8",
-    "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "playwright": "^1.62.1"
+    "express": "^4.19.2"
   }
 }

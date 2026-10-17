@@ -15,9 +15,9 @@ const { DatabaseSync } = require('node:sqlite');
 
 const APP = path.join(__dirname, '..');
 const FIX = path.join(__dirname, 'fixtures');
-// quem clonou o repositório não tem os dados reais: o teste é pulado em vez de quebrar
+// sem os dados (quem clonou o repositório): o teste não tem contra o que conferir
 if (!fs.existsSync(path.join(FIX, 'esperado.json'))) {
-  test('teste de ouro (precisa de test/fixtures/, que fica fora do git)', { skip: 'sem test/fixtures/' }, () => {});
+  test('teste de ouro', { skip: 'sem test/fixtures/ — os dados reais ficam só na máquina de quem os gerou' }, () => {});
   return;
 }
 const ESPERADO = JSON.parse(fs.readFileSync(path.join(FIX, 'esperado.json'), 'utf8'));
@@ -60,12 +60,16 @@ async function subirServidor() {
   const url = `http://127.0.0.1:${porta}`;
   for (let i = 0; ; i++) {
     if (proc.exitCode !== null) throw new Error('o servidor caiu ao iniciar:\n' + saida);
-    try { if ((await fetch(url + '/api/meses')).ok) break; } catch (e) { /* ainda subindo */ }
+    try { if ((await fetch(url + '/api/acesso/estado')).ok) break; } catch (e) { /* ainda subindo */ }
     if (i > 120) throw new Error('o servidor não respondeu em 18s:\n' + saida);
     await new Promise(r => setTimeout(r, 150));
   }
-  const api = async (rota, opts) => {
-    const r = await fetch(url + rota, opts);
+  // banco de teste não tem conta: cria uma (deste PC não precisa do código de instalação) e usa a sessão
+  const criada = await fetch(url + '/api/acesso/criar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: 'teste', senha: 'teste123' }) });
+  if (!criada.ok) throw new Error('não criou a conta de teste: ' + await criada.text());
+  const cookie = criada.headers.get('set-cookie').split(';')[0];
+  const api = async (rota, opts = {}) => {
+    const r = await fetch(url + rota, { ...opts, headers: { ...(opts.headers || {}), cookie } });
     const corpo = await r.json();
     if (!r.ok) throw new Error(`${rota} respondeu ${r.status}: ${JSON.stringify(corpo)}`);
     return corpo;
