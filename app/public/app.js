@@ -166,9 +166,17 @@ function barraPeriodo(rootId, storageKey, onChange) {
   };
 }
 
+// mesma largura do @media do celular no style.css
+const ehCelular = () => matchMedia('(max-width: 760px)').matches;
+
 // ---------- navegação ----------
 const VIEWS = ['visao', 'extratos', 'projecao', 'mes', 'recorrentes', 'reconciliar', 'configurar'];
+const sidebar = document.querySelector('.sidebar');
+document.getElementById('nav-mais').onclick = e => { e.stopPropagation(); sidebar.classList.toggle('mais'); };
+document.addEventListener('click', e => { if (!sidebar.contains(e.target)) sidebar.classList.remove('mais'); });
 document.querySelectorAll('.nav-item[data-view]').forEach(b => b.onclick = () => {
+  sidebar.classList.remove('mais');
+  window.scrollTo(0, 0);
   document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
   VIEWS.forEach(v => document.getElementById('view-' + v).hidden = v !== b.dataset.view);
@@ -742,7 +750,7 @@ function renderizarAnalyticsVisual(resumo, rows) {
           const dataFmt = t.data ? t.data.slice(5) : '';
           const fonteFmt = nomeFonte(t.fonte);
           return `
-            <div class="ext-top-row" style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" title="Duplo-clique para editar">
+            <div class="ext-top-row" style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" onclick="if (ehCelular()) abrirEdicaoTx(${t.id})" title="Duplo-clique para editar">
               <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
                 <span style="color:var(--txt); font-weight:600;">${desc.slice(0, 22)}</span>
                 <span class="muted" style="font-size:10.5px; margin-left:4px;">${dataFmt} · ${fonteFmt}</span>
@@ -849,8 +857,8 @@ function renderizarTabelaOuAgrupado() {
           : '<span class="muted" style="font-size:11px;">—</span>';
 
         const catHtml = t.categoria
-          ? `<span class="tag" style="cursor:pointer;" onclick="filtrarPorCategoria(this.dataset.cat)" data-cat="${t.categoria}" title="Filtrar por ${t.categoria}">${t.categoria}</span>`
-          : `<span class="tag" style="background:rgba(255,180,84,.15); color:var(--amber); cursor:pointer; font-size:11px;" onclick="abrirEdicaoTx(${t.id})" title="Clique para categorizar">⚠️ Sem categoria</span>`;
+          ? `<span class="tag" style="cursor:pointer;" onclick="event.stopPropagation(); filtrarPorCategoria(this.dataset.cat)" data-cat="${t.categoria}" title="Filtrar por ${t.categoria}">${t.categoria}</span>`
+          : `<span class="tag" style="background:rgba(255,180,84,.15); color:var(--amber); cursor:pointer; font-size:11px;" onclick="event.stopPropagation(); abrirEdicaoTx(${t.id})" title="Clique para categorizar">⚠️ Sem categoria</span>`;
 
         const obsHtml = t.observacao ? ` <span class="muted" title="${t.observacao}" style="cursor:help;">${ico('note')}</span>` : '';
         const parcelaHtml = t.parcela ? ` <span class="tag" style="font-size:10.5px; padding:1px 5px; color:var(--cyan); background:rgba(0,214,143,.1);">${t.parcela}</span>` : '';
@@ -875,7 +883,7 @@ function renderizarTabelaOuAgrupado() {
           : (ehNeutro ? 'Movimentação neutra (transferência/pagamento de fatura). Duplo-clique para editar' : 'Duplo-clique para editar');
 
         return `
-          <tr class="${classeLinha}" style="cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" title="${titleLinha}">
+          <tr class="${classeLinha}" style="cursor:pointer;" ondblclick="abrirEdicaoTx(${t.id})" onclick="if (ehCelular()) abrirEdicaoTx(${t.id})" title="${titleLinha}">
             <td class="muted mono" style="font-size:12px;">${t.data}</td>
             <td>
               ${badgeOculta}<span style="font-weight:600; color:${ehNeutro ? 'var(--muted)' : 'var(--txt)'};">${t.descricao}</span>
@@ -1706,7 +1714,7 @@ function renderTabelaRecorrentes() {
     tb.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:30px; color:var(--muted);">Nenhuma recorrência encontrada</td></tr>`;
   } else {
     tb.innerHTML = filtradas.map(r => `
-      <tr style="cursor:pointer" ondblclick="editarRec(${r.id})" title="Duplo clique para editar">
+      <tr style="cursor:pointer" ondblclick="editarRec(${r.id})" onclick="if (ehCelular()) editarRec(${r.id})" title="Duplo clique para editar">
         <td>
           <span class="badge ${r.ativo ? 'pago' : 'vencido'}" style="cursor:pointer; user-select:none;" onclick="event.stopPropagation(); toggleRec(${r.id})" title="Clique para ${r.ativo ? 'pausar' : 'ativar'}">
             ${r.ativo ? 'ATIVA' : 'PAUSADA'}

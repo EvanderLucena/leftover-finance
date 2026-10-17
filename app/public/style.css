@@ -33,6 +33,8 @@ button .ico-svg svg { width: 13px; height: 13px; }
 .nav-item { padding: 11px 14px; border-radius: 8px; color: var(--muted); cursor: pointer; display: flex; gap: 12px; align-items: center; margin-bottom: 2px; font-weight: 500; font-size: 15px; }
 .nav-item.active { background: var(--panel2); color: var(--txt); border-left: 2px solid var(--green); }
 .nav-item:hover { background: var(--panel2); }
+.nav-item i { font-style: normal; width: 16px; text-align: center; }
+.nav-item .curto, .nav-mais { display: none; }
 .sidebar .section { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); padding: 16px 14px 6px; }
 
 .content { padding: 24px 32px; max-width: 2000px; }
@@ -560,15 +562,33 @@ canvas { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale
   .topbar .logo { font-size: 15px; }
   #top-fontes, #top-renda { display: none; }
   .layout { display: block; min-height: 0; }
+  /* barra de baixo: Hoje · Projeção · Contas · Transações · Mais; o resto abre por cima ao tocar em Mais */
   .sidebar {
     position: fixed; bottom: 0; left: 0; right: 0; top: auto; height: auto; z-index: 60;
-    display: flex; gap: 4px; overflow-x: auto; padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    border-right: none; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; overflow: visible;
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    border-right: none; border-top: 1px solid var(--line); box-shadow: 0 -6px 18px rgba(0,0,0,.35);
   }
   .sidebar .section { display: none; }
-  .nav-item { flex: 0 0 auto; margin: 0; padding: 9px 12px; font-size: 13px; gap: 6px; white-space: nowrap; }
-  .nav-item.active { border-left: none; border-bottom: 2px solid var(--green); }
-  .content { padding: 12px 12px 84px; }
+  .nav-item { order: 1; flex-direction: column; gap: 1px; margin: 0; padding: 6px 2px; min-height: 52px; justify-content: center;
+    font-size: 11px; line-height: 1.2; white-space: nowrap; border-radius: 10px; -webkit-tap-highlight-color: transparent; }
+  .nav-item i { font-size: 19px; width: auto; line-height: 1.1; }
+  .nav-item span { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .nav-item .curto { display: inline; }
+  .nav-item span:has(+ .curto) { display: none; }
+  .nav-item.active { border-left: none; background: rgba(0,214,143,.1); color: var(--green); }
+  .nav-item:hover { background: transparent; }
+  .nav-item.active:hover { background: rgba(0,214,143,.1); }
+  .nav-mais { display: flex; order: 2; }
+  .sidebar:has(.extra.active) .nav-mais { color: var(--green); }
+  .nav-item.extra { display: none; order: 0; grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; gap: 14px;
+    min-height: 50px; padding: 0 18px; font-size: 15px; border-bottom: 1px solid var(--line); border-radius: 0; }
+  .nav-item.extra i { font-size: 17px; width: 22px; }
+  .sidebar.mais { padding-top: 6px; }
+  .sidebar.mais .nav-item.extra { display: flex; }
+  .sidebar.mais .nav-mais { background: var(--panel2); color: var(--txt); }
+  .content { padding: 12px 12px calc(80px + env(safe-area-inset-bottom)); }
+  #toast { left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); text-align: center; }
   .panel { padding: 14px; border-radius: 12px; overflow-x: auto; }
   .panel h4 { flex-wrap: wrap; gap: 6px; }
   .grid, .g2, .g23, .vc-hero, .proj-hero, .ph-side, .rec-summary, .ext-analytics-grid { grid-template-columns: minmax(0, 1fr) !important; }
@@ -719,4 +739,114 @@ tr.linha-conta:hover td { background: rgba(255, 255, 255, .02); }
   .dc-det { padding: 0 16px; }
   .dc-form { grid-template-columns: 1fr; }
   .dc-rodape { border-radius: 0; }
+}
+
+/* ---------- celular: tabelas viram cartões (uma linha = um cartão), filtros sem grudar no topo ---------- */
+@media (max-width: 760px) {
+  #tbl-mes, #tbl-rec, #ext-table, .tbl-alivio, #view-reconciliar table { display: block; }
+  #tbl-mes thead, #tbl-rec thead, #ext-table thead, .tbl-alivio thead, #view-reconciliar thead { display: none; }
+  #tbl-mes tbody, #tbl-rec tbody, #ext-tbody, #proj-dividas, #conc-padroes { display: block; }
+  #tbl-mes tr, #tbl-rec tr, #ext-tbody tr, #proj-dividas tr, #conc-padroes tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 12px 2px; border-bottom: 1px solid var(--line);
+  }
+  #tbl-mes td, #tbl-rec td, #ext-tbody td, #proj-dividas td, #conc-padroes td { padding: 0; border: none; background: none !important; }
+  #tbl-mes td[colspan], #tbl-rec td[colspan], #ext-tbody td[colspan], #proj-dividas td[colspan], #conc-padroes td[colspan] { flex: 1 1 100%; }
+  /* quebra de linha depois do valor (order 2): o resto sempre começa na segunda linha */
+  #tbl-mes tr::after, #tbl-rec tr::after, #ext-tbody tr::after, #proj-dividas tr::after, #conc-padroes tr::after { content: ''; order: 2; flex-basis: 100%; height: 0; margin-top: -6px; }
+  tr:hover td { background: none; }
+  .panel:has(> table#tbl-mes), .panel:has(> table#tbl-rec) { padding-top: 4px; padding-bottom: 4px; }
+
+  /* contas do mês: nome + valor; embaixo status, vencimento, categoria e ações */
+  #tbl-mes tr { padding-left: 8px; padding-right: 0; }
+  #tbl-mes td:nth-child(2) { order: 1; flex: 1 1 calc(100% - 150px); min-width: 0; }
+  #tbl-mes td:nth-child(3) { order: 2; font-size: 15px; }
+  #tbl-mes td:nth-child(1) { order: 3; }
+  #tbl-mes td:nth-child(4) { order: 4; font-size: 12.5px; }
+  #tbl-mes td:nth-child(5) { order: 5; }
+  #tbl-mes td:nth-child(6) { order: 6; margin-left: auto; }
+  #tbl-mes .tx-anexada { overflow-wrap: anywhere; }
+
+  /* recorrentes: nome + valor; embaixo status, dia, frequência, categoria e ações (tipo, forma e padrão ficam na edição) */
+  #tbl-rec td:nth-child(2) { order: 1; flex: 1 1 calc(100% - 150px); min-width: 0; }
+  #tbl-rec td:nth-child(3) { order: 2; font-size: 15px; }
+  #tbl-rec td:nth-child(1) { order: 3; }
+  #tbl-rec td:nth-child(4) { order: 4; font-size: 12.5px; }
+  #tbl-rec td:nth-child(7) { order: 5; font-size: 12.5px; }
+  #tbl-rec td:nth-child(5) { order: 6; }
+  #tbl-rec td:nth-child(10) { order: 7; margin-left: auto; }
+  #tbl-rec td:nth-child(6), #tbl-rec td:nth-child(8), #tbl-rec td:nth-child(9) { display: none; }
+  #tbl-rec td:nth-child(2) > span.muted { display: block; margin-top: 2px; }
+
+  /* transações: descrição + valor; embaixo data, conta, categoria, natureza e editar */
+  #ext-tbody tr { gap: 5px 8px; }
+  #ext-tbody td:nth-child(2) { order: 1; flex: 1 1 calc(100% - 150px); min-width: 0; overflow-wrap: anywhere; }
+  #ext-tbody td:nth-child(6) { order: 2; white-space: nowrap; font-size: 14.5px; }
+  #ext-tbody td:nth-child(1) { order: 3; }
+  #ext-tbody td:nth-child(3) { order: 4; }
+  #ext-tbody td:nth-child(4) { order: 5; }
+  #ext-tbody td:nth-child(5) { order: 6; }
+  #ext-tbody td:nth-child(7) { display: none; }
+  #ext-tbody td:nth-child(8) { display: none; } /* no celular o toque na linha já abre a edição */
+  #ext-tbody .tag { margin-right: 0; }
+
+  /* parcelas da projeção: contrato + valor/mês; embaixo onde, restam, saldo e última; progresso na largura toda */
+  #proj-dividas tr.alivio-grupo { padding: 0; border: none; }
+  #proj-dividas tr.alivio-grupo td { background: var(--panel2) !important; padding: 10px 12px; border-radius: 8px; margin-top: 10px; line-height: 1.5; }
+  #proj-dividas td:nth-child(1) { order: 1; flex: 1 1 50%; min-width: 0; overflow-wrap: anywhere; }
+  #proj-dividas td:nth-child(4) { order: 2; font-weight: 700; }
+  #proj-dividas td:nth-child(4)::after { content: '/mês'; color: var(--muted); font-weight: 400; font-size: 12px; }
+  #proj-dividas td:nth-child(2) { order: 3; font-size: 12.5px; }
+  #proj-dividas td:nth-child(3) { order: 4; font-size: 12.5px; color: var(--muted); }
+  #proj-dividas td:nth-child(3)::before { content: 'restam '; }
+  #proj-dividas td:nth-child(5) { order: 5; font-size: 12.5px; }
+  #proj-dividas td:nth-child(5)::before { content: 'falta '; color: var(--muted); font-weight: 400; }
+  #proj-dividas td:nth-child(7) { order: 6; font-size: 12.5px; margin-left: auto; color: var(--muted); }
+  #proj-dividas td:nth-child(7)::before { content: 'última '; }
+  #proj-dividas td:nth-child(6) { order: 7; flex: 1 1 100%; }
+  #proj-dividas .progress { width: auto; }
+
+  /* padrões aprendidos: conta + vezes; padrão do extrato embaixo */
+  #conc-padroes td:nth-child(2) { order: 1; flex: 1 1 60%; }
+  #conc-padroes td:nth-child(3) { order: 2; }
+  #conc-padroes td:nth-child(1) { order: 3; flex: 1 1 100%; font-size: 12px; color: var(--muted); }
+
+  /* transações: filtros rolam junto com a página; períodos e auditoria numa faixa deslizante */
+  .ext-filtros { position: static !important; padding: 12px !important; }
+  .ext-filtros .filters { gap: 8px; }
+  #per-bar-extratos, .ext-filtros .filters:last-child { flex-wrap: nowrap !important; overflow-x: auto; margin-left: -12px; margin-right: -12px; padding: 0 12px 2px; scrollbar-width: none; }
+  #per-bar-extratos::-webkit-scrollbar, .ext-filtros .filters:last-child::-webkit-scrollbar { display: none; }
+  #per-bar-extratos > *, .ext-filtros .filters:last-child > * { flex: none; white-space: nowrap; }
+  .ext-filtros .filters:last-child .spacer { display: none; }
+  .ext-filtros .filters:nth-child(2) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ext-filtros .filters:nth-child(2) .fselect { min-width: 0 !important; width: 100%; }
+  .ext-filtros #ext-busca { grid-column: 1 / -1; order: -1; }
+  .fchip { padding: 8px 14px; }
+  #ext-conta { min-width: 0 !important; flex: 1 1 100%; }
+  .ext-card-analitico { height: 230px; }
+
+  /* projeção: texto e botões do hero empilhados, botões na largura toda */
+  .ph-main { padding: 16px; }
+  .ph-trajectory { flex-direction: column; align-items: stretch; gap: 4px; }
+  .ph-trajectory > span:last-child { flex-direction: column; }
+  .ph-trajectory button { width: 100%; }
+  .ph-box { padding: 12px 14px; }
+  .proj-grafico { height: 280px; }
+  #proj-dividas-busca { width: 100% !important; }
+
+  /* barras de ação das abas: botões e buscas ocupam a linha */
+  #view-mes > .filters, #view-recorrentes > .filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #view-mes > .filters > *, #view-recorrentes > .filters > * { width: 100% !important; max-width: none !important; min-width: 0 !important; }
+  #view-mes > .filters > span, #view-recorrentes > .filters > span, #btn-auto-conciliar-mes { grid-column: 1 / -1; }
+  #view-mes > .filters > span:empty, #view-recorrentes > .filters > span:empty { display: none; }
+
+  /* toque: alvos maiores, sem hover grudado */
+  button.ghost, button.cta { min-height: 40px; }
+  #btn-privado { min-height: 36px; }
+  dialog menu button { flex: 1; }
+  dialog form > div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; }
+  #modal-conta > .panel { max-height: calc(100dvh - 32px); overflow-y: auto; }
+}
+@media (max-width: 760px) {
+  #proj-filtros-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+  #proj-filtros-chips > * { flex: none; white-space: nowrap; }
 }
