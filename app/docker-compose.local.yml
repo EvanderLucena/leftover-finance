@@ -1,0 +1,17 @@
+# Só o app, acessível apenas nesta máquina em http://localhost:4321 (nenhum outro aparelho da rede abre).
+# Uso: docker compose -f docker-compose.local.yml up -d
+# Primeira vez: o código de instalação aparece em `docker compose -f docker-compose.local.yml logs app`.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      FINANCA_DB: /data/financas.db
+      PORT: 4321
+      FINANCA_HOST: 0.0.0.0           # dentro do container; quem limita o acesso é a linha "ports" abaixo
+      FINFLOW_COFRE: /data/cofre
+      AUVP_KEY: ${AUVP_KEY:-}
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:4321:4321"
