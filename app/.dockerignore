@@ -9,3 +9,9 @@ cache-*.json
 *.pdf
 *.xlsx
 *.csv
+data
+test
+*.sqlite*
+*.xls
+*.ofx
+*.qif

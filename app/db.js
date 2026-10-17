@@ -191,7 +191,9 @@ if (cats.n === 0) {
 }
 const cfg = db.prepare("SELECT COUNT(*) AS n FROM config").get();
 if (cfg.n === 0) {
-  db.prepare("INSERT INTO config (chave, valor) VALUES ('mes_atual', '09-2026')").run();
+  // instalação nova começa no mês corrente (formato MM-AAAA)
+  const [ano, mes] = require('./core/calendario').hojeISO().split('-');
+  db.prepare("INSERT INTO config (chave, valor) VALUES ('mes_atual', ?)").run(`${mes}-${ano}`);
 }
 
 // seed contas_bancarias

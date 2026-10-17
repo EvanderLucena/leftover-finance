@@ -1,0 +1,17 @@
+# Só o app, sem Caddy/HTTPS, acessível apenas nesta máquina em http://localhost:4321
+# Uso: docker compose -f docker-compose.local.yml up -d
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      FINANCA_DB: /data/financas.db
+      PORT: 3000
+      FINFLOW_COFRE: /data/cofre
+      AUVP_URL: ${AUVP_URL:-}
+      AUVP_KEY: ${AUVP_KEY:-}
+      AUVP_ATIVO: ${AUVP_ATIVO:-}
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:4321:3000"

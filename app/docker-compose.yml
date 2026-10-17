@@ -9,7 +9,7 @@ services:
       FINFLOW_COFRE: /data/cofre
       AUVP_URL: ${AUVP_URL:-}
       AUVP_KEY: ${AUVP_KEY:-}
-      AUVP_ATIVO: ${AUVP_ATIVO:-0}
+      AUVP_ATIVO: ${AUVP_ATIVO:-}
     volumes:
       - ./data:/data
     expose:
